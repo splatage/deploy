@@ -43,7 +43,7 @@ my $debug = false;    # Print out settings returned from DB
 ##   Database Connection                                 ##
 ###########################################################
 
-read_config_file('cluster.cfg');
+read_config_file('deploy.cfg');
 $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
        "$db_user", "$db_pass", { 'RaiseError' => 1 } );
 
@@ -375,7 +375,7 @@ sub refreshDB {
 sub read_config_file {
     my ($configfile) = @_[0];
 
-    open( CONFIG, '<', $configfile ) or croak "[!!] cluster.cfg doesn't exist";
+    open( CONFIG, '<', $configfile ) or croak "[!!] $configfile doesn't exist";
 
     while (<CONFIG>) {
         chomp;                 # no newline
