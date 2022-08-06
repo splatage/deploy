@@ -5,11 +5,45 @@ use Mojo::mysql;
 
 plugin 'AutoReload';
 
+my %conf;
 # Connect to a local database
 #my $mysql = Mojo::mysql->strict_mode('mysql://username@/test');
  
 # Connect to a remote database
-my $db = Mojo::mysql->strict_mode('mysql://USERNAME:PASSWORD@IP/DB');
+my $configfile = 'deploy.cfg';
+
+read_config_file($configfile);
+
+sub read_config_file {
+    my ($configfile) = $_[0];
+    
+    my $var;
+    my $val;
+
+    open( CONFIG, '<', $configfile ) or die "[!!] $configfile doesn't exist";
+
+    while (<CONFIG>) {
+        chomp;                 # no newline
+        s/#.*//;               # no comments
+        s/^\s+//;              # no leading white
+        s/\s+$//;              # no trailing white
+        next unless length;    # anything left?
+        ( $var, $val ) = split( /\s*=\s*/, $_, 2 );
+        $conf{$var} = $val;
+    }
+
+    close(CONFIG);
+
+    $conf{'db_host'} or die "[!!] db_host value is missing in $configfile";
+    $conf{'db_user'} or die "[!!] db_user value is missing in $configfile";
+    $conf{'db_pass'} or die "[!!] db_pass value is missing in $configfile";
+    $conf{'db_name'} or die "[!!] db_name value is missing in $configfile";
+}
+
+
+my $db_string  = "mysql://" . $conf{'db_user'} . ":";
+   $db_string .= $conf{'db_pass'} . "@" . $conf{'db_host'} . "/" . $conf{'db_name'};
+my $db = Mojo::mysql->strict_mode($db_string);
 
 
 # Configure Yancy
