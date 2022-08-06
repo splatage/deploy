@@ -6,6 +6,8 @@ use DBI;
 use Carp         qw( croak );
 use Data::Dumper qw(Dumper);
 use POSIX qw(strftime);
+# use strict;
+# use warnings;
 
 #use Time::Local qw( timelocal_posix timegm_posix );
 # use Modern::Perl
@@ -121,7 +123,8 @@ sub main {
     clear_isOnline_table();
 
     foreach my $node (@enabled_nodes) { fill_isOnline_table($node) }
-      $log->debug("key: $online_games{$key}\n");
+      $log->debug("key: $online_games{$node}\n");
+
 
     pruneList();
 
@@ -174,8 +177,22 @@ sub pruneList {
 
     keys %prune_list;
     while ( my ( $n, $ip ) = each %prune_list ) {
+            sendCommand( "say Server is closing in 10 seconds", $n );   
+    }
+    
+    sleep(5);
+    
+    keys %prune_list;
+    while ( my ( $n, $ip ) = each %prune_list ) {
         haltGame( $n, $ip );
     }
+    
+    
+    keys %prune_list;
+    while ( my ( $n, $ip ) = each %prune_list ) {
+        haltGame( $n, $ip );
+    }
+    
     
     $sth->finish();
     $log->debug("Nothing to do") if not (%prune_list);
@@ -558,10 +575,6 @@ sub haltGame {
     my ( $this_game, $ip ) = @_;
 
     $log->info("Halting: $this_game $ip");
-    
-    sendCommand( "say Server is closing", $this_game );
-    
-    sleep(5);
 
     sendCommand( "servermanager kick $this_game", bungee );
     deregisterGame($this_game);
@@ -691,7 +704,7 @@ sub bootGame {
         
         my $screen_log  = $game_settings{$gs_name}{'node_path'} . "/";
            $screen_log .= $gs_name . "/game_files/screenlog.0";
-        my $failed      = $ssh_node_host->capture("tail $screen_log");
+        my $failed      = $ssh_connections{$ip}->capture("tail $screen_log");
 
         @results = split( /\n/, $failed );
         foreach (@results) {
