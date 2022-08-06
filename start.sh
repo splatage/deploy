@@ -17,7 +17,7 @@ function start () {
 
 function stop () {
 
-    screen -list | awk -F '.' '/mojo/ || /deploy/ {print $1}' | xargs kill {}
+    screen -list | awk -F '.' '/mojo/ || /deploy/ {print $1}' | xargs kill
     sleep 2
     
     screen -list
