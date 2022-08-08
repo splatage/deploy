@@ -9,3 +9,4 @@ Requirements:<br/>
 * mojolicous<br/>
 * yancy<br/>
 * mysql/mariadb<br/>
+* OpenSSH<br/>
