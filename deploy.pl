@@ -217,7 +217,7 @@ sub bootList {
 
     $log->debug("Generating list of game instances to boot");
 
-    my %boot_list;
+    my %boot_list = ();
 
   # Find games off-line but marked as enabled
     my $query  = "select t1.gs_name, t1.node_host from game_servers t1 LEFT JOIN ";
@@ -271,11 +271,11 @@ sub registerGame {
     ( $isrestricted = false ) if not $game_settings{$name}{'is_restricted'};
 
     my $cmd;
-       $cmd = "servermanager delete " . $name;
+       $cmd = "servermanager delete ^M" . $name;
 
-    sendCommand( "$cmd", $gatewayName );
+   # sendCommand( "$cmd", $gatewayName );
 
-    $cmd  = "servermanager add " . $name . " ";
+    $cmd .= "servermanager add " . $name . " ";
     $cmd .= $game_settings{$name}{'node_host'} . " ";
     $cmd .= $game_settings{$name}{'port'} . " ";
     $cmd .= ${islobby} . " true ";
@@ -315,7 +315,7 @@ sub sendCommand {
        $ssh_connection->system("screen -p 0 -S $gs_name -X hardcopy");
        $ssh_connection->system("screen -p 0 -S $gs_name -X eval 'stuff \"" . $this_cmd . "\"^M'" );
        
-     $log->trace( "\[$ip\] $gs_name: screen -p 0 -S $gs_name -X eval 'stuff \"" 
+     $log->debug( "\[$ip\] $gs_name: screen -p 0 -S $gs_name -X eval 'stuff \"" 
           . $this_cmd
           . "\"^M'" );
           
@@ -328,7 +328,7 @@ sub sendCommand {
     @results =~ /\S/, @results;
     $results =~ s/[^[:ascii:]]//g, $results;
     foreach (@results) {
-        $log->debug("$_");
+        $log->debug("$gs_name SCREEN: $_");
     }
     
     return $results;
@@ -559,7 +559,7 @@ sub fill_isOnline_table {
          my $screen_log;
          
          if ( $screenname eq $gatewayName ) {
-            $screen_log .= sendCommand( "glist",    $screenname );
+            $screen_log = sendCommand( "glist",    $screenname );
          }
          else {
             $screen_log  = sendCommand( "minecraft:time query gametime^Mversion^Mmemory^M",  $screenname );
@@ -766,21 +766,6 @@ sub bootGame {
             $log->warn("$_");
         }
         return 1;
-    }
-    else {
-    
-     my $epoch_time = time();
-     my $insert  = "INSERT INTO isOnline ( node, checked, online, gs_name, ip, cpu, mem ) ";
-        $insert .= "values ('$ip', FROM_UNIXTIME('$epoch_time')";
-        $insert .= ", '1', '$gs_name', '$ip', '0', '0') ON DUPLICATE KEY UPDATE gs_name='$gs_name' ";
-
-     $log->info("boot sql: $insert");
-        
-       refreshDB();
-        my $sth = $dbh->prepare($insert);
-           $sth->execute();
-        
-    #INSERT INTO table (id, name, age) VALUES(1, "A", 19) ON DUPLICATE KEY UPDATE name="A", age=19
     }
     return 0;
 }
