@@ -6,6 +6,10 @@ use DBI;
 use Carp         qw( croak );
 use Data::Dumper qw(Dumper);
 use POSIX qw(strftime);
+use Time::Piece;
+use Time::Seconds;
+
+ 
 # use strict;
 # use warnings;
 
@@ -18,27 +22,28 @@ use Log::Log4perl;
 ##         Declare Variables for Global Scope            ##
 ###########################################################
 
-my $db_host;     # From config file
-my $db_user;     # From config file
-my $db_pass;     # From config file
-my $db_name;     # From config file
-my $dbh;         # DataBase Handle
-my $sth;         # DB Syntax Handle
-my $ref;         # HASH reference for DB results
-my %settings;    # Multi-Dimensional HASH storing the DB settings
-my %game_settings;
-my %global_settings;
-my %node_settings;
-my %ssh_connections;
-my @enabled_games;
-my @disabled_games;
-my @enabled_nodes;
-my @disabled_nodes;
-my %online_games;
-my $online_nodes;
-my $log_conf;
+my $db_host;            # From config file
+my $db_user;            # From config file
+my $db_pass;            # From config file
+my $db_name;            # From config file
+my $dbh;                # DataBase Handle
+my $sth;                # DB Syntax Handle
+my $ref;                # HASH reference for DB results
+my %settings;           # HASH storing the DB settings
+my %game_settings;      # HASH storing DB gamesettings
+my %global_settings;    # Hash storing global variables
+my %node_settings;      # HASH sotring nodes from DB
+my %ssh_connections;    # HASH Storing ssh connections
+my @enabled_games;      # 
+my @disabled_games;     #
+my @enabled_nodes;      #
+my @disabled_nodes;     #
+my %online_games;       #
+my $online_nodes;       #
+my $log_conf;           #
+my @gateway_name;
 
-my $time = time();
+
 my $debug = false;    # Print out settings returned from DB
 
 ###########################################################
@@ -64,15 +69,19 @@ my $log = Log::Log4perl::get_logger();
 ##                      MAIN                             ##
 ###########################################################
 
-my $delay = 60;   # Time period for main loop in seconds
-while(){main()};  # Start endless main loop
-#main();          # if a process takes longer this allows
+my $delay = 60;
+my $time  = $delay;
+                  # Time period for main loop in seconds
+#while(){main()};  # Start endless main loop
+main();          # if a process takes longer this allows
                   # us to gracefully drop a time loop
                   # rather than coliding tasks
 
 sub main {
 
     syncTime($delay);
+
+    $time = time();
     $log->info("Waking up");
     
     refreshDB();
@@ -117,7 +126,11 @@ sub main {
     get_node_settings_key_value->(
         \%node_settings, 'enabled', '0', \@disabled_nodes
     );
+    get_game_settings_key_value->(
+        \%game_settings, 'isBungee', '1', \@gateway_name
+    );
     
+    @gateway_name[0] or die "[!!] FATAL: isBungee is not set. You must specify the bungecord server"; 
     
   # Clear and repopulate the temp table
     clear_isOnline_table();
@@ -194,7 +207,7 @@ sub pruneList {
     }
     
     
-    $sth->finish();
+    
     $log->debug("Nothing to do") if not (%prune_list);
 }
 
@@ -229,7 +242,7 @@ sub bootList {
         registerGame($n);
     }
     
-    $sth->finish();
+    
     $log->debug("Nothing to do") if not (%boot_list);
 }
 
@@ -258,7 +271,7 @@ sub registerGame {
     my $cmd;
        $cmd = "servermanager delete " . $name;
 
-    sendCommand( "$cmd", 'bungee' );
+    sendCommand( "$cmd", '@gateway_name[0]' );
 
     $cmd  = "servermanager add " . $name . " ";
     $cmd .= $game_settings{$name}{'node_host'} . " ";
@@ -266,7 +279,7 @@ sub registerGame {
     $cmd .= ${islobby} . " true ";
     $cmd .= $isrestricted . " " . $name;
 
-    sendCommand( "$cmd", 'bungee' );
+    sendCommand( "$cmd", '@gateway_name[0]' );
 
     return 0;
 }
@@ -275,8 +288,8 @@ sub deregisterGame {
 
     my $name = @_[0];
     my $cmd = "servermanager delete " . $name;
-    my $name = bungee;
-       $log->info("Deregistering $name from the network");
+    my $name = @gateway_name[0];
+       $log->debug("Deregistering $name from the network");
        
     sendCommand( "$cmd", $name );
 
@@ -304,18 +317,19 @@ sub sendCommand {
           . $this_cmd
           . "\"^M'" );
           
-    sleep(.2);
+     Time::HiRes::sleep( 0.05 );
     
     $ssh_connection->system("screen -p 0 -S $gs_name -X hardcopy");
     $results = $ssh_connection->capture("cat $gs_name/game_files/hardcopy.0");
 
     my @results = split( '\n', $results );
     @results =~ /\S/, @results;
+    $results =~ s/[^[:ascii:]]//g, $results;
     foreach (@results) {
         $log->debug("$_");
     }
     
-    return @results;
+    return $results;
 }
 
 
@@ -348,7 +362,7 @@ sub fetch_settings_from_db {
         }
     }
 
-    $sth->finish();
+    
 
 }
 
@@ -365,12 +379,10 @@ sub debug {
 
 sub syncTime {
     my $period = @_[0];
-    $time = time();
-    
-    $log->info("Going back to sleep");
+   
+    $log->debug("Going back to sleep");
     
     while ( ( $time % $period ) != 0 ) {
-        #$log->info("Pausing until next $period");
         $time = time();
         sleep(1);
     }
@@ -482,7 +494,7 @@ sub clear_isOnline_table {
     
     my $sth = $dbh->prepare("DROP TABLE IF EXISTS isOnline;");
               $sth->execute();
-              $sth->finish();
+              
 
     my $new_table  = 'CREATE TABLE isOnline ';
        $new_table .= '( id int(9) NOT NULL AUTO_INCREMENT, node VARCHAR(255) NOT NULL, ';
@@ -492,13 +504,13 @@ sub clear_isOnline_table {
 
     $sth = $dbh->prepare("$new_table");
            $sth->execute();
-           $sth->finish();
+
 
     $insert = 'UPDATE game_servers SET online = 0, cpu = NULL, mem = NULL;';
     
     $sth = $dbh->prepare($insert);
            $sth->execute();
-           $sth->finish(); 
+ 
 }
 
 
@@ -514,25 +526,66 @@ sub fill_isOnline_table {
 
     $log->debug("Games on $this_node \[$this_ip\]");
 
-    connectSSH( 'minecraft', $node_settings{$this_node}{ip} );
+    connectSSH( 'minecraft', $node_settings{$this_node}{ip} ) or next;
 
     my $procs   = $ssh_connections{$this_ip}->capture("screen -list");
     my @screens = split( '\n', $procs );
        @screens = grep /[0-9]+\.[a-zA-Z0-9]/, @screens;
 
-    foreach my $line (@screens) {
-        my @columns = split( /\s/, $line );
-        my ( $screenpid, $screenname ) = split( /\./, @columns[1] );
-     
-        $online_games{$screenname} = $this_ip;
 
+    foreach my $line (@screens) {
+ 
+        my @columns = split( /\s/, $line );
+        
+        my ( $screenpid, $screenname ) = split( /\./, @columns[1] );
+        my @info;
+        
+        $game_settings{$screenname} or next;
+        $online_games{$screenname} = $this_ip;
+        
+        
+
+          
         my $insert;
         my $epoch_time = time();
 
         my @proc = split( ' ',
             $ssh_connections{$this_ip}->capture("ps --no-headers --ppid $screenpid -o %cpu,rss") );
-              
-        @proc[1] = int( @proc[1] / 1024 );
+            @proc[1] = int( @proc[1] / 1024 );
+
+
+         my $screen_log;
+         
+         if ( $screenname eq '@gateway_name[0]' ) {
+            $screen_log .= sendCommand( "glist",    $screenname );
+         }
+         else {
+            $screen_log  = sendCommand( "minecraft:time query gametime^Mversion^Mmemory^M",  $screenname );
+         }
+
+         my $plugins      = $game_settings{$screenname}{'node_path'} . "/";
+            $plugins     .= $screenname . "/game_files/plugins/";
+            $screen_log  .= "Plugins:\n" . $ssh_connections{$this_ip}->capture("cd $plugins; ls *jar");
+
+         foreach my $result ( split('\n', $screen_log ) ) {
+            if ( $result !~ m/command/i ) {
+                 $result =~ s/^\[[^\]]+]:/> /;
+                 $result =~ s/^/<div>/;
+                 $result =~ s/$/<\/div>/;
+                 push @info, $result;
+                   $log->trace("$result");
+             }
+            if ( $result =~ m/The time is / ) {
+                 $result =~ s/[^0-9]//g;
+                 $result = $result / 20;
+                 $result = Time::Seconds->new($result);
+                 $result = $result->pretty;
+                 push @info, "Server online for $result!";
+                   $log->trace("$result");
+            }
+         }
+
+        $result = join( '', @info );
 
         $log->debug("\[$screenpid\] $screenname \t@proc[0]%\t@proc[1]M ");
 
@@ -540,23 +593,22 @@ sub fill_isOnline_table {
         $insert .= "values ('$this_node', FROM_UNIXTIME('$epoch_time')";
         $insert .= ", '1', '$screenname', '$this_ip', '@proc[0]', '@proc[1]')";
 
-        $log->trace("$insert");
-
+        
+       refreshDB();
         my $sth = $dbh->prepare($insert);
            $sth->execute();
-           $sth->finish();
-               
-        $insert  = "UPDATE game_servers SET cpu = '@proc[0]', mem = '@proc[1]' ";
+        
+
+        $insert  = "UPDATE game_servers SET cpu = '@proc[0]', mem = '@proc[1]', info = '$result' ";
         $insert .= "WHERE gs_name = '$screenname';";
 
-        $log->trace("$insert");
-
+        
+       refreshDB();
         my $sth = $dbh->prepare($insert);
            $sth->execute();
-           $sth->finish();
         
-    }
-        
+
+    };
  
     
     $insert  = "UPDATE game_servers INNER JOIN ";
@@ -565,9 +617,10 @@ sub fill_isOnline_table {
     
     $log->trace("$insert");
     
+    refreshDB();
     my $sth = $dbh->prepare($insert);
        $sth->execute();
-       $sth->finish();
+    
 }
 
 
@@ -576,7 +629,7 @@ sub haltGame {
 
     $log->info("Halting: $this_game $ip");
 
-    sendCommand( "servermanager kick $this_game", bungee );
+    sendCommand( "servermanager kick $this_game", @gateway_name[0] );
     deregisterGame($this_game);
     sendCommand( "co purge t:90d", $this_game );
     sleep(2);
@@ -592,11 +645,11 @@ sub haltGame {
 sub configLogger {
 
     $log_conf = q{
-        log4perl.category                  = DEBUG, Logfile, Screen, DBAppndr
+        log4perl.category                  = INFO, Logfile, Screen, DBAppndr
 
  
         log4perl.appender.Logfile          = Log::Log4perl::Appender::File
-        log4perl.appender.Logfile.filename = cluster.log
+        log4perl.appender.Logfile.filename = deploy.log
         log4perl.appender.Logfile.layout   = Log::Log4perl::Layout::PatternLayout
         log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms %p %L %m %T%n 
  
@@ -711,6 +764,20 @@ sub bootGame {
             $log->warn("$_");
         }
         return 1;
+    }
+    else {
+    
+     my $insert  = "INSERT INTO isOnline ( node, checked, online, gs_name, ip, cpu, mem ) ";
+        $insert .= "values ('$ip', FROM_UNIXTIME('$epoch_time')";
+        $insert .= ", '1', '$gs_name', '$ip', '0', '0') ON DUPLICATE KEY UPDATE gs_name='$gs_name' ";
+
+     $log->info("boot sql: $insert");
+        
+       refreshDB();
+        my $sth = $dbh->prepare($insert);
+           $sth->execute();
+        
+    #INSERT INTO table (id, name, age) VALUES(1, "A", 19) ON DUPLICATE KEY UPDATE name="A", age=19
     }
     return 0;
 }

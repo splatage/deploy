@@ -1,6 +1,6 @@
 
 use v5.28;
-use Mojolicious::Lite;
+use Mojolicious::Lite -signatures;
 use Mojo::mysql;
 
 plugin 'AutoReload';
@@ -45,6 +45,7 @@ my $db_string  = "mysql://" . $conf{'db_user'} . ":";
    $db_string .= $conf{'db_pass'} . "@" . $conf{'db_host'} . "/" . $conf{'db_name'};
 my $db = Mojo::mysql->strict_mode($db_string);
 
+#my $server = $c->server('gs_name');
 
 # Configure Yancy
 plugin Yancy => {
@@ -60,6 +61,7 @@ plugin Yancy => {
     },
 };
 
+
 # Display the gameservers list
 get '/', {
     controller => 'yancy',
@@ -67,8 +69,6 @@ get '/', {
     template => 'index',
     schema => 'game_servers',
     limit => 100,
-#        enabled => 1,
-#    },
 }, 'game_servers.list';
 
 # Set the delivered state of a list row
@@ -79,6 +79,17 @@ post '/enabled/:gs_name', {
     properties => [qw( gs_name node_host enabled )],
     forward_to => 'game_servers.list',
 }, 'game_servers.enabled';
+
+# Display the gameservers list
+
+get '/game_servers/:gs_name' => {
+    controller => 'yancy',
+    action => 'get',
+    schema => 'game_servers',
+    template => 'server',
+} => 'gs_name.get';
+
+
 
 # Start the app. Must be the last line of the script.
 app->start;
@@ -107,8 +118,11 @@ CREATE TABLE `game_servers` (
   `is_lobby` tinyint(1) NOT NULL DEFAULT 0,
   `is_restricted` tinyint(1) NOT NULL DEFAULT 0,
   `enabled` tinyint(1) NOT NULL DEFAULT 1,
-  `mem` int(11) DEFAULT NULL,
+  `online` tinyint(1) DEFAULT 0,
   `cpu` int(11) DEFAULT NULL,
+  `mem` int(11) DEFAULT NULL,
+  `info` text DEFAULT NULL,
+  `isBungee` tinyint(1) DEFAULT 0,
   PRIMARY KEY (`gs_name`),
   UNIQUE KEY `gs_name` (`gs_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
@@ -215,29 +229,29 @@ UNLOCK TABLES;
     <link rel="stylesheet" href="/yancy/bootstrap.css">
 </head>
 <body>
+
+<div style="height: 100px">
+
+   <div class="media" >
+       <img class="align-self-center ml-4" 
+       src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="Generic placeholder image" height="75">
+
+       <div class="media-body ml-4">
+           <h2 class="mt-1"><a href="/">splatage.com Server List</a></h2>
+           <a href="/yancy">Server Settings</a>
+       </div>
+   </div>
+</div>
+
     <main class="container">
         %= content
     </main>
 </body>
 
+
+
 @@ index.html.ep
 % layout 'default';
-
-
-<div style="height: 100px">
-
-   <div class="media" >
-       <img class="align-self-center mr-3" 
-       src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="Generic placeholder image" height="75">
-
-       <div class="media-body">
-           <h2 class="mt-1">splatage.com Server List</h2>
-           <a href="yancy">Server Settings</a>
-       </div>
-   </div>
-</div>
-
-
 
 <ul class="list-group ">
    % for my $item ( @$items ) {
@@ -258,8 +272,11 @@ UNLOCK TABLES;
                     <button type="button" class="
                         <%= $online ? 'btn btn-success btn-sm' : 'btn btn-danger btn-sm' %>
                         ">
-                    
-                        %= $item->{gs_name}
+                        <a href="/game_servers/
+%= $item->{gs_name}
+">
+                          %= $item->{gs_name}
+                        </a>
                     </button>
      
                     <button type="button" class="
@@ -304,10 +321,45 @@ UNLOCK TABLES;
        </li>
     % }
 </ul>
-
 %= javascript begin
     // Automatically submit the form when an input changes
     $( 'form input' ).change( function ( e ) {
         $(this).parents("form").submit();
     } );
 % end
+
+@@ server.html.ep
+% layout 'default';
+
+<ul class="list-group ">
+       %= csrf_field
+       % my $online  = $item->{online};
+       % my $is_lobby  = $item->{is_lobby};
+       % my $is_restricted  = $item->{is_restricted};
+
+       <li class="list-group-item d-flex justify-content-between list-group-item-action 
+            <%= $online ? '' : ' list-group-item-secondary' %>" >
+ 
+            <div class="media" >
+                <img class="align-self-top mr-3" 
+                    src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
+                    alt="Generic placeholder image" height="40">
+
+                <div class="btn-group" role="group" aria-label="Basic example">
+                    <button type="button" class="
+                        <%= $online ? 'btn btn-success btn-sm' : 'btn btn-danger btn-sm' %>
+                        ">
+                    
+                        %= $item->{gs_name}
+                    </button>                    
+                </div>
+            </div>
+   
+       </li>
+       %== $item->{info}       
+</ul>
+
+
+
+
+
