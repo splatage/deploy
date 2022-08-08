@@ -72,8 +72,8 @@ my $log = Log::Log4perl::get_logger();
 my $delay = 60;
 my $time  = $delay;
                   # Time period for main loop in seconds
-#while(){main()};  # Start endless main loop
-main();          # if a process takes longer this allows
+while(){main()};  # Start endless main loop
+#main();          # if a process takes longer this allows
                   # us to gracefully drop a time loop
                   # rather than coliding tasks
 
