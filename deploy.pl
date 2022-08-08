@@ -42,6 +42,7 @@ my %online_games;       #
 my $online_nodes;       #
 my $log_conf;           #
 my @gateway_name;
+my $gatewayName;
 
 
 my $debug = false;    # Print out settings returned from DB
@@ -129,15 +130,15 @@ sub main {
     get_game_settings_key_value->(
         \%game_settings, 'isBungee', '1', \@gateway_name
     );
-    
+ 
     @gateway_name[0] or die "[!!] FATAL: isBungee is not set. You must specify the bungecord server"; 
+    $gatewayName = @gateway_name[0];
+    
     
   # Clear and repopulate the temp table
     clear_isOnline_table();
 
     foreach my $node (@enabled_nodes) { fill_isOnline_table($node) }
-      $log->debug("key: $online_games{$node}\n");
-
 
     pruneList();
 
@@ -201,10 +202,10 @@ sub pruneList {
     }
     
     
-    keys %prune_list;
-    while ( my ( $n, $ip ) = each %prune_list ) {
-        haltGame( $n, $ip );
-    }
+#    keys %prune_list;
+#    while ( my ( $n, $ip ) = each %prune_list ) {
+#        haltGame( $n, $ip );
+#    }
     
     
     
@@ -260,6 +261,7 @@ sub registerGame {
    
     my ($name) = @_[0];
 
+
     $log->info("Registering $name on the network");
 
     ( $islobby = true )       if     $game_settings{$name}{'is_lobby'};
@@ -271,7 +273,7 @@ sub registerGame {
     my $cmd;
        $cmd = "servermanager delete " . $name;
 
-    sendCommand( "$cmd", '@gateway_name[0]' );
+    sendCommand( "$cmd", $gatewayName );
 
     $cmd  = "servermanager add " . $name . " ";
     $cmd .= $game_settings{$name}{'node_host'} . " ";
@@ -279,7 +281,7 @@ sub registerGame {
     $cmd .= ${islobby} . " true ";
     $cmd .= $isrestricted . " " . $name;
 
-    sendCommand( "$cmd", '@gateway_name[0]' );
+    sendCommand( "$cmd", $gatewayName );
 
     return 0;
 }
@@ -288,10 +290,10 @@ sub deregisterGame {
 
     my $name = @_[0];
     my $cmd = "servermanager delete " . $name;
-    my $name = @gateway_name[0];
+    #my $name = $gatewayName;
        $log->debug("Deregistering $name from the network");
        
-    sendCommand( "$cmd", $name );
+    sendCommand( "$cmd", $gatewayName );
 
 }
 
@@ -556,7 +558,7 @@ sub fill_isOnline_table {
 
          my $screen_log;
          
-         if ( $screenname eq '@gateway_name[0]' ) {
+         if ( $screenname eq $gatewayName ) {
             $screen_log .= sendCommand( "glist",    $screenname );
          }
          else {
@@ -629,14 +631,14 @@ sub haltGame {
 
     $log->info("Halting: $this_game $ip");
 
-    sendCommand( "servermanager kick $this_game", @gateway_name[0] );
+    sendCommand( "servermanager kick $this_game^Mco purge t:90d", $gatewayName );
     deregisterGame($this_game);
-    sendCommand( "co purge t:90d", $this_game );
+#    sendCommand( "co purge t:90d", $this_game );
     sleep(2);
 
     storeGame($this_game);
-    sendCommand( "stop", $this_game );
-    sendCommand( "end",  $this_game );
+    sendCommand( "stop^Mend", $this_game );
+#    sendCommand( "end",  $this_game );
     sleep(1);
 
     return 0;
@@ -645,7 +647,7 @@ sub haltGame {
 sub configLogger {
 
     $log_conf = q{
-        log4perl.category                  = INFO, Logfile, Screen, DBAppndr
+        log4perl.category                  = DEBUG, Logfile, Screen, DBAppndr
 
  
         log4perl.appender.Logfile          = Log::Log4perl::Appender::File
@@ -767,6 +769,7 @@ sub bootGame {
     }
     else {
     
+     my $epoch_time = time();
      my $insert  = "INSERT INTO isOnline ( node, checked, online, gs_name, ip, cpu, mem ) ";
         $insert .= "values ('$ip', FROM_UNIXTIME('$epoch_time')";
         $insert .= ", '1', '$gs_name', '$ip', '0', '0') ON DUPLICATE KEY UPDATE gs_name='$gs_name' ";

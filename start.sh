@@ -5,8 +5,6 @@
 function start () {
 
     screen -h 1024 -L -dmS mojo morbo myApp.pl
-     sleep 1
-
     screen -h 1024 -L -dmS deploy perl deploy.pl
      sleep 1
 
