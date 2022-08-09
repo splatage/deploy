@@ -271,7 +271,7 @@ sub registerGame {
     ( $isrestricted = false ) if not $game_settings{$name}{'is_restricted'};
 
     my $cmd;
-       $cmd = "servermanager delete ^M" . $name;
+       $cmd = "servermanager delete " . $name . "^M";
 
    # sendCommand( "$cmd", $gatewayName );
 
@@ -303,6 +303,10 @@ sub sendCommand {
     my ( $this_cmd, $gs_name ) = @_;
     my @results;
     my $ip = $online_games{$gs_name};
+    
+    $ip         || return 1;
+    $this_cmd   || return 1;
+    
     
      $log->debug("Sending command: $this_cmd to $gs_name");
 
@@ -469,6 +473,9 @@ sub connectSSH {
     
     my ( $credentials, $ip ) = @_;
     
+    $ip             || return 1;
+    $credentials    || return 1;
+    
     if ($ssh_connections{$ip}) {
         $ssh_connections{$ip}->check_master;
         $log->debug("SSH $credentials\@$ip is healthy");
@@ -594,16 +601,16 @@ sub fill_isOnline_table {
         $insert  = "INSERT INTO isOnline ( node, checked, online, gs_name, ip, cpu, mem ) ";
         $insert .= "values ('$this_node', FROM_UNIXTIME('$epoch_time')";
         $insert .= ", '1', '$screenname', '$this_ip', '@proc[0]', '@proc[1]')";
-
+        $log->trace("$insert");
         
        refreshDB();
         my $sth = $dbh->prepare($insert);
            $sth->execute();
         
 
-        $insert  = "UPDATE game_servers SET cpu = '@proc[0]', mem = '@proc[1]', info = '$result' ";
-        $insert .= "WHERE gs_name = '$screenname';";
-
+        $insert  = "UPDATE game_servers SET cpu = '@proc[0]', mem = '@proc[1]', info = " . $dbh->quote($result);
+        $insert .= " WHERE gs_name = '$screenname';";
+        $log->trace("$insert");
         
        refreshDB();
         my $sth = $dbh->prepare($insert);
