@@ -1,22 +1,29 @@
-#!/usr/bin/perl
 
+use v5.28;
+use Mojolicious::Lite -signatures;
+use Mojo::mysql;
+use Minion;
 use Net::OpenSSH;
 use DBD::mysql;
 use DBI;
 use Carp         qw( croak );
-use Data::Dumper qw(Dumper);
-use POSIX qw(strftime);
+use Data::Dumper qw( Dumper );
+use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
-
- 
-# use strict;
-# use warnings;
-
-#use Time::Local qw( timelocal_posix timegm_posix );
-# use Modern::Perl
-
+use Net::Ping;
 use Log::Log4perl;
+
+use File::Basename;
+use lib dirname (__FILE__) . "/lib/Game";
+#use Game;
+use strict;
+use warnings;
+
+# Make admin ui available under "/minion"
+plugin 'Minion::Admin';
+plugin 'AutoReload';
+
 
 ###########################################################
 ##         Declare Variables for Global Scope            ##
@@ -30,34 +37,52 @@ my $dbh;                # DataBase Handle
 my $sth;                # DB Syntax Handle
 my $ref;                # HASH reference for DB results
 my %settings;           # HASH storing the DB settings
-my %game_settings;      # HASH storing DB gamesettings
-my %global_settings;    # Hash storing global variables
-my %node_settings;      # HASH sotring nodes from DB
-my %ssh_connections;    # HASH Storing ssh connections
-my @enabled_games;      # 
-my @disabled_games;     #
-my @enabled_nodes;      #
-my @disabled_nodes;     #
+my %User_Preferences;
+my $users;
+#my %DBgames;            # HASH storing DB gamesettings
+#my %DBglobals;          # Hash storing global variables
+#my %DBnodes;            # HASH sotring nodes from DB
+my %SSH_connections;    # HASH Storing ssh connections
+
+my $DBgames   = {}; my %DBgames     = %$DBgames;    
+my $DBglobals = {}; my %DBglobals   = %$DBglobals;
+my $DBnodes   = {}; my %DBnodes     = %$DBnodes;        
+
+
+
+my $enabledGames;      # 
+my $disabledGames;     #
+my $enabledNodes;      #
+my $disabledNodes;     #
+
+
 my %online_games;       #
 my $online_nodes;       #
 my $log_conf;           #
 my @gateway_name;
 my $gatewayName;
+# my ($args, %args);
 
-
-my $debug = false;    # Print out settings returned from DB
+my $debug = 'false';    # Print out settings returned from DB
 
 ###########################################################
 ##   Database Connection                                 ##
 ###########################################################
 
-read_config_file('deploy.cfg');
+read_config_file('config/deploy.cfg');
+
 $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
        "$db_user", "$db_pass", { 'RaiseError' => 1 } );
+       
+my $db_string  = "mysql://" . $db_user . ":" .$db_pass . "@" . $db_host. "/" .$db_name;
+#   $db_string .= $conf{'db_pass'} . "@" . $conf{'db_host'} . "/" . $conf{'db_name'};
+my $db = Mojo::mysql->strict_mode($db_string);
 
-###########################################################
-##             Logging Configuration                     ##
-###########################################################
+plugin Minion => {mysql => "$db_string"};
+
+
+
+## Logging
 
 configLogger();
 Log::Log4perl::init( \$log_conf );
@@ -66,332 +91,781 @@ my $log = Log::Log4perl::get_logger();
    $log->info("Hello! Starting...");
 
 
+
+
+
+
 ###########################################################
-##                      MAIN                             ##
+## Minion Functions
 ###########################################################
 
-my $delay = 60;
-my $time  = $delay;
-                  # Time period for main loop in seconds
-while(){main()};  # Start endless main loop
-#main();          # if a process takes longer this allows
-                  # us to gracefully drop a time loop
-                  # rather than coliding tasks
 
-sub main {
+plugin 'Minion::Admin' => {route => app->routes->any('/minion')};
 
-    syncTime($delay);
 
-    $time = time();
-    $log->info("Waking up");
+
+## Update #################################################
+
+get '/update/:game/:node' => sub ($c) {
+    my $task = 'update' ;
+    my $game = $c->stash('game');
+    my $node = $c->stash('node');
+      
+    $c->minion->enqueue($task => [$game]);
+
+    $c->redirect_to("/node/$node");
+};
+app->minion->add_task(update => sub ($job, $game) {
+    my $task = 'update' ;
+    my $lock = $game;
+    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 1200);
+
+    $job->app->log->info("Job: $task $game begins");
+    sleep 5;
+        
+    my $result = `hostname`;
+
+    $job->app->log->info("$task $game completed");
+    $job->finish({message => "$task $game completed", output => $result});
+    app->minion->unlock($lock);
+});
+
+
+## Boot   #################################################
+
+get '/boot/:game/:node' => sub ($c) {
+    my $task = 'boot' ;
+    my $node = $c->stash('node');
+    my $game = $c->stash('game');
+      
+        $c->minion->enqueue($task => [$game]);
+
+    $c->redirect_to("/node/$node");
+};
+app->minion->add_task(boot => sub ($job, $game) {
+    my $task = 'boot' ;
+    my $lock = $game;
+    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 1200);
+
+
+      my $deploy = deployGame(game => $game);
+        $job->note(deploy => $deploy);
+      my $boot   = bootGame(game => $game);
+        $job->note(boot => $boot);
+      my $regist = registerGame(game => $game);
+        $job->note(register => $regist);
+
+    $job->app->log->info("$task $game completed");
+    $job->finish({message => "$task $game completed"});
+    app->minion->unlock($lock);
+});
+
+
+## Halt ###################################################
+
+get '/halt/:game/:node' => sub ($c) {
+    my $task = 'halt' ;
+    my $node = $c->stash('node');
+    my $game = $c->stash('game');
+      
+        $c->minion->enqueue($task => [$game]);
+
+    $c->redirect_to("/node/$node");
+};
+app->minion->add_task(halt => sub ($job, $game) {
+    my $task = 'halt' ;
+    my $lock = $game;
+    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 1200);
+
+    $job->app->log->info("Job: $task $game begins");
+
+    my $store  = storeGame(game => $game);
+    my $halt   = haltGame( game => $game);
+
+    $job->app->log->info("$task $game completed");
+    $job->finish({message => "$task $game completed", store => $store, halt => $halt});
     
-    refreshDB();
+    app->minion->unlock($lock);
+});
+
+
+## Deploy #################################################
+
+get '/deploy/:game/:node' => sub ($c) {
+    my $task = 'deploy' ;
+    my $node = $c->stash('node');
+    my $game = $c->stash('game');
+      
+        $c->minion->enqueue($task => [$game]);
+
+    $c->redirect_to("/node/$node");
+};
+app->minion->add_task(deploy => sub ($job, $game) {
+    my $task = 'deploy' ;
+    my $lock = $game;
+    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 1200);
+
+    $job->app->log->info("Job: $task $game begins");
+        
+    my $output = deployGame(game => $game);
+
+    $job->app->log->info("$task $game completed");
+    $job->finish({message => "$task $game completed", deploy => $output});
+    app->minion->unlock($lock);
+});
+
+
+## Store #################################################
+
+get '/store/:game/:node' => sub ($c) {
+    my $task = 'store';
+    my $node = $c->stash('node');
+    my $game = $c->stash('game');
+      
+        $c->minion->enqueue($task => [$game]);
+
+    $c->redirect_to("/node/$node");
+};
+app->minion->add_task(store => sub ($job, $game) {
+    my $task = 'store' ;
+    my $lock = $game;
+    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 1200);
+
+    $job->app->log->info("Job: $task $game begins");
+
+    my $output = storeGame(game => $game);
+
+    $job->app->log->info("$task $game completed");
+    $job->finish({message => "$task $game completed", store => $output});
+    app->minion->unlock($lock);
+});
+
+
+## Link ###################################################
+
+get '/link/:game/:node' => sub ($c) {
+    my $task = 'link';
+    my $node = $c->stash('node');
+    my $game = $c->stash('game');
+      
+        $c->minion->enqueue($task => [$game]);
+
+    $c->redirect_to("/node/$node");
+};
+app->minion->add_task(link => sub ($job, $game) {
+    my $task = 'link';
+    my $lock = $game;
+    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 10);
+
+    $job->app->log->info("Job: $task $game begins");
+    sleep 1;
+        
+    #Do Stuff here
+
+    $job->app->log->info("$task $game completed");
+    $job->finish({message => "$task $game completed"});
+    app->minion->unlock($lock);
+});
+
+
+## Drop #################################################
+
+get '/drop/:game/:node' => sub ($c) {
+    my $task = 'drop';
+    my $node = $c->stash('node');
+    my $game = $c->stash('game');
+      
+    $c->minion->enqueue($task => [$game]);
+
+    $c->redirect_to("/node/$node");
+};
+app->minion->add_task(drop => sub ($job, $game) {
+    my $task = 'drop' ;
+    my $lock = $game;
+    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 10);
+
+    $job->app->log->info("Job: $task $game begins");
+    sleep 1;
+        
+    #Do Stuff here
+
+    $job->app->log->info("$task $game completed");
+    $job->finish({message => "$task $game completed"});
+    app->minion->unlock($lock);
+});
+
+
+
+
+
+
 
 ###########################################################
-##            Sync Data from DataBase                    ##
+##               Configure Yancy
 ###########################################################
-    %{$global_settings} = ();
-    %{$game_settings}   = ();
-    %{$node_settings}   = ();
 
-    fetch_settings_from_db->( global_settings, var_name );
-    fetch_settings_from_db->( game_servers,    gs_name );
-    fetch_settings_from_db->( nodes,           node_name );
 
-    debug->( %global_settings );
-    debug->( %node_settings );
-    debug->( %game_settings );
+plugin Yancy => {
+    backend => { mysql => $db },
+    # Read the schema configuration from the database
+    read_schema => 1,
+    schema => {
+        games => {
+            # Show these columns in the Yancy editor
+            'x-list-columns' => [qw( name enabled node store mem_max server_bin )],
+        },
+    },
+};
 
+
+
+
+
+###########################################################
+##          Routing            
+###########################################################
+
+
+
+get '/' => sub ($c) {
+    my  $results        = checkIsOnline( 
+        list_by         => 'node', 
+        node            => '',
+        game            => '' );
+    
+    my  $expected       = readFromDB( 
+        table           => 'games',
+        column          => 'name',
+        hash_ref        => 'true' );
+                           
+    $c->stash( nodes    => $results, 
+               expected => $expected );
+               
+    $c->render(template => 'index' );
+};
+
+
+get '/log/:node/:game'  => sub ($c) {
+    my $game            = $c->stash('game');
+    my $node            = $c->stash('node');
+
+    my $results         = readLog( node => $node,
+                               game => $game );
+
+  $c->render(template   => 'log',
+             log_data   => $results, 
+             node       => $node, 
+             game       => $game);
+};
+
+
+get '/node/:node'       => sub ($c) {
+    my $node            = $c->stash('node');
+    my $results         = checkIsOnline( 
+        list_by         => 'node', 
+        node            => $node, 
+        game            => '' );
+             
+    my $ip              = readFromDB( 
+        table           => 'nodes',
+        column          => 'ip',
+        field           => 'name',
+        value           => $node,
+        hash_ref        => 'false' );
+
+    my $expected        = readFromDB( 
+        table           => 'games',
+        column          => 'name',
+        field           => 'node',
+        value           => $node,
+        hash_ref        => 'true' );
    
-   # Clear out varables and fetch them from the DB
-   # The DB is to connection point that allows us to 
-   # be modular...web api will update values, to
-   # be retrived here
+    my $jobs            = app->minion->jobs({
+        queues          => ['default'], 
+        states          => ['active', 'locked'], 
+        tasks           => ['boot', 'halt'] });
    
-    @enabled_games=();
-    @disabled_games=();
-    @enabled_nodes=();
-    @disabled_nodes=();
-    @online_games=();
-    @online_nodes=();
+    $c->render(template => 'node', 
+        nodes           => $results, 
+        history         => $jobs, 
+        expected        => $expected);
+};
 
-    get_game_settings_key_value->(
-        \%game_settings, 'enabled', '1', \@enabled_games
+
+get '/files/:game'      => sub ($c) {
+    my $game            = $c->stash('game');
+    my @results         = getFiles(game => $game);
+    
+    $c->stash(files     => @results);
+    $c->render(template => 'files' );
+};
+
+
+sub readLog {
+        my %args = ( 
+        game     => '',
+        node     => '', 
+        @_,         # argument pair list goes here
     );
-    get_game_settings_key_value->(
-        \%game_settings, 'enabled', '0', \@disabled_games
-    );
-    get_node_settings_key_value->(
-        \%node_settings, 'enabled', '1', \@enabled_nodes
-    );
-    get_node_settings_key_value->(
-        \%node_settings, 'enabled', '0', \@disabled_nodes
-    );
-    get_game_settings_key_value->(
-        \%game_settings, 'isBungee', '1', \@gateway_name
-    );
+    my $game = $args{'game'} or return 1;
+    my $node = $args{'node'} or return 1;
+    
+    my $return_string;
+    
+    my $ip      =  readFromDB( 
+        table   => 'nodes',
+        column  => 'ip',
+        field   => 'name',
+        value   => $node,
+        hash_ref => 'false' );
+                        
+    if ( ! $ip ) {
+        my $warning  = '<div class="alert alert-danger" role="alert">';
+           $warning .= '!! WARNING !! <a href="/yancy#/nodes" class="alert-link">';
+           $warning .= "$node is miss-configured in the nodes table in database";
+           $warning .= '</a></div>';
+        return $warning;
+    }
+    
+                                                 
+    my $user    = readFromDB(
+        table   => 'games',
+        column  => 'node_usr',
+        field   => 'name',
+        value   => $game, 
+        hash_ref => 'false' );
+                        
+    if ( ! $user ) {
+        my $warning  = '<div class="alert alert-danger" role="alert">';
+           $warning .= '!! WARNING !! <a href="/yancy#/games" class="alert-link">';
+           $warning .= "$game is miss-configured in the games_servers table in database";
+           $warning .= '</a></div>';
+        return $warning;
+    }
+    
+    
+    connectSSH( user => $user, ip => $ip ) ;
+    
+    my $cmd     = "[ -f ~/$game/game_files/screenlog.0 ] ";
+       $cmd    .= "&& tail -10000 ~/$game/game_files/screenlog.0 | tac | ";
+       $cmd    .= "sed '/Starting minecraft\\\|Enabled Waterfall/q' | tac";
+    
+    my $log     = $SSH_connections{$user.$ip}->capture("$cmd");
+       $log     =~ s/ /\&nbsp;/g;
+    my @lines   = split(/\n/, $log);
+    
+    foreach ( @lines ) {
+        $return_string .= '<div style="width: 80rem;"><small>' . $_ . '</small></div>';
+    }
+    
+    $return_string =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;
+    $return_string =~ s/\r//g;s/\007//g;
+    $return_string =~ s/[^[:print:]]+//g;
+
+    return $return_string;
+}
+
+
+sub readFromDB {
+
+    my %args = (
+        table       => '', 
+        column      => '', 
+        field       => '',
+        value       => '',
+        hash_ref    => 'true',         
+    @_);
+            
+    return 1 if not $args{'table'};
+    return 1 if not $args{'column'};
+    
+    my $table  = $args{'table'};
+    my $column = $args{'column'};
+    my $field  = $args{'field'};
+    my $value  = $args{'value'};
+    
+    
+    my ($ref, $ref_name, $ref_value);
+    my $result = {};
+    my %result = %$result;
+    
+    $log->debug("sub readFromDB");
+    
+    my $select = '*';
+       $select = $column if ( $args{'hash_ref'} eq 'false' );
+    
+    my $query = "SELECT $select FROM $table";   
+    $log->debug("Reading DB table:");
+    
+    if ( $field ne '' && $value ne '' ) {
+        $query .= " WHERE $field = '$value'";
+    }
+    
+    $query .= ";";
+    $log->debug("$query");
+    
+    $sth = $dbh->prepare($query);
+    $sth->execute();
+
+
+    while ( $ref = $sth->fetchrow_hashref() ) {
+    my $index_name = $ref->{$column};
  
-    @gateway_name[0] or die "[!!] FATAL: isBungee is not set. You must specify the bungecord server"; 
-    $gatewayName = @gateway_name[0];
+        foreach ( @{ $sth->{NAME} } ) {
+            $ref_name  = $_;
+            $ref_value = $ref->{$ref_name};
+                $result{$index_name}{$ref_name} = $ref_value;
+        }
+    }
     
+    $sth->finish();
     
-  # Clear and repopulate the temp table
-    clear_isOnline_table();
-
-    foreach my $node (@enabled_nodes) { fill_isOnline_table($node) }
-
-    pruneList();
-
-    bootList();
-
-    return 0;
+    if ( $args{'hash_ref'} eq 'true' ) {
+        return \%result;
+    }
+    else {
+        return $ref_value;
+    }
 }
 
 
-sub pruneList {
+# checkIsOnline();
+sub checkIsOnline {
 
-    $log->debug("Generating list of game instances to prune");
+    my %args = ( 
+        game        => '',
+        node        => '',
+        pid         => '',
+        user        => 'minecraft',
+        list_by     => 'game',
+        @_,         # argument pair list goes here
+    );
 
-    my %prune_list;
+    my $enabledNodes   = readFromDB( 
+        table       => 'nodes',
+        column      => 'name', 
+        field       => 'enabled', 
+        value       => '1',
+        hash_ref    => 'true'
+                  );
 
-   # Find game servers that are running but not marked as enabled
-    my  $query = "select t1.gs_name, t2.ip from game_servers t1 LEFT JOIN ";
-        $query .= "isOnline t2 ON t1.gs_name = t2.gs_name WHERE ";
-        $query .= "t2.online = 1 AND t1.enabled = 0;";
+    my $enabledGames   = readFromDB( 
+        table       => 'games',
+        column      => 'name', 
+        field       => 'enabled', 
+        value       => '1',
+        hash_ref    => 'true' );
 
-    my  $sth = $dbh->prepare("$query");
-        $sth->execute();
-
-     $log->trace("$query");
-
-    while ( $ref = $sth->fetchrow_hashref ) {
-            $prune_list{ $ref->{gs_name} } = $ref->{ip};
-            $log->info("[!!] Marked to HALT: $ref->{gs_name} $ref->{ip}");
+    my %enabledNodes = %$enabledNodes;
+    my @live_nodes;
+    my @dead_nodes;
+    my @nodes_to_check;
+    my $temp_hash   = {};
+    my %temp_hash   = %$temp_hash;
+    my $return_hash = {};
+    my %return_hash = %$return_hash;
+    my $list_by     = $args{'list_by'};
+    my $user        = $args{'user'};
+        
+    if ( $args{'node'} ) {
+        @nodes_to_check = $args{'node'};
+        $log->debug( "Using specified node" );
+    }
+    else {
+        @nodes_to_check = (sort keys %{$enabledNodes});
+        $log->debug( "Using nodes from DB" );
     }
 
-    ## Running but on the wrong machine. Shut down to migrate
-    my  $query = "select t1.gs_name, t2.ip from game_servers t1 LEFT JOIN ";
-        $query .= "isOnline t2 ON t1.gs_name = t2.gs_name WHERE ";
-        $query .= "t1.node_host != t2.ip;";
+        $log->debug( "Pinging: \[@nodes_to_check\]" );
 
-    my  $sth = $dbh->prepare("$query");
-        $sth->execute();
+   
+   foreach my $this_node (@nodes_to_check) {
+        #my %this_node = %$this_node;        
+        $log->debug( "this node: $this_node");
+        my $p = Net::Ping->new;
+        if ($p->ping($enabledNodes{$this_node}{'ip'} , 0.1)) {
+            $log->debug( "[OK] $this_node is online" ); 
+            push @live_nodes, $this_node ;
+        }
+        else {
+            $log->debug( "[!!] $this_node is offline" );
+            push @dead_nodes, $this_node ; 
+        } 
+    }
+           $log->debug( "Checking: \[@live_nodes\]" );
 
-    $log->trace("$query");
+    
+    
+    foreach my $this_node (@live_nodes) {
+        $log->debug("Query $this_node for games...");
+        
+        my $ip = $enabledNodes{$this_node}{'ip'};
+        
 
-    while ( $ref = $sth->fetchrow_hashref ) {
-            $prune_list{ $ref->{gs_name} } = $ref->{ip};
-            $log->info("[!!] Marked to migrate: $ref->{gs_name} $ref->{ip} => $game_settings{$ref->{gs_name}}{node_host}"
-        );
+        next if connectSSH( user => $user, ip => $ip );
+        $return_hash{$this_node} = {};
+         
+        my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
+        my $screen_list = $SSH_connections{$user.$ip}->capture("@cmd");
+#        $log->debug("$screen_list");
+
+        my @screen_list = split( '\n', $screen_list );
+        
+        foreach my $this_game ( @screen_list ) {
+            my @column = split( / +/ , $this_game );
+            
+            if ( $column[2] eq '1' ) {
+                # SCREEN has ppid of 1. Load the PID and game 
+                $temp_hash{$column[1].$this_node}{'node'}   = $this_node;
+                $temp_hash{$column[1].$this_node}{'user'}   = $column[0];
+                $temp_hash{$column[1].$this_node}{'game'}   = $column[12];
+            }
+            
+            if ( $column[2] ne '1' ) {
+                # Match java child ppid to SCREEN pid to reference correct hash
+                $temp_hash{$column[2].$this_node}{'pid'}    = $column[1];
+                $temp_hash{$column[2].$this_node}{'ppid'}   = $column[2];
+                $temp_hash{$column[2].$this_node}{'pcpu'}   = $column[3];
+                $temp_hash{$column[2].$this_node}{'pmem'}   = $column[4];
+                $temp_hash{$column[2].$this_node}{'vsz'}    = $column[5];
+                $temp_hash{$column[2].$this_node}{'rss'}    = $column[6];
+            }
+        }             
+    }
+    
+    ## Remap temp_hash into return_hash based on $list_by arg
+    #  Using list_by|game pair to avoind duplicates
+    foreach my $result ( keys %temp_hash ) {
+      my $list_by = $temp_hash{$result}{ $args{'list_by'} };
+      
+      
+      my $game    = $temp_hash{$result}{'game'};
+      
+        $log->warn("[!!] $game is running multiple times!") if ( $return_hash{$list_by}{$game} );
+      
+        $return_hash{$list_by}{$game}{'node'}  = $temp_hash{$result}{'node'};
+        $return_hash{$list_by}{$game}{'user'}  = $temp_hash{$result}{'user'};
+        $return_hash{$list_by}{$game}{'game'}  = $temp_hash{$result}{'game'};
+        $return_hash{$list_by}{$game}{'pid'}   = $temp_hash{$result}{'pid'};
+        $return_hash{$list_by}{$game}{'ppid'}  = $temp_hash{$result}{'ppid'};
+        $return_hash{$list_by}{$game}{'pcpu'}  = $temp_hash{$result}{'pcpu'};
+        $return_hash{$list_by}{$game}{'pmem'}  = $temp_hash{$result}{'pmem'};
+        $return_hash{$list_by}{$game}{'vsz'}   = $temp_hash{$result}{'vsz'};
+        $return_hash{$list_by}{$game}{'rss'}   = $temp_hash{$result}{'rss'};
+    }
+    
+    ## Load the offline nodes
+    foreach my $offline (@dead_nodes) {
+        $return_hash{$offline}{'offline'}{'offline'} = 'true';
     }
 
-    #############################
-    ### ShutDown ################
-    #############################
-
-    keys %prune_list;
-    while ( my ( $n, $ip ) = each %prune_list ) {
-            sendCommand( "say Server is closing in 10 seconds", $n );   
+    if ( $args{game} ) {
+        
+        if ( $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} ) {
+            $log->debug( "Found $args{'game'} on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}" );
+            return "$return_hash{ $args{'game'} }{ $args{'game'} }{'node'}" 
+        }
+        
+        else {
+            return 0
+        }
     }
     
-    sleep(5);
-    
-    keys %prune_list;
-    while ( my ( $n, $ip ) = each %prune_list ) {
-        haltGame( $n, $ip );
-    }
-    
-    
-#    keys %prune_list;
-#    while ( my ( $n, $ip ) = each %prune_list ) {
-#        haltGame( $n, $ip );
-#    }
-    
-    
-    
-    $log->debug("Nothing to do") if not (%prune_list);
+        return \%return_hash;  
 }
 
-
-sub bootList {
-
-    $log->debug("Generating list of game instances to boot");
-
-    my %boot_list = ();
-
-  # Find games off-line but marked as enabled
-    my $query  = "select t1.gs_name, t1.node_host from game_servers t1 LEFT JOIN ";
-       $query .= "isOnline t2 ON t1.gs_name = t2.gs_name ";
-       $query .= "WHERE t2.ip IS NULL AND t1.enabled = 1";
-
-    my $sth = $dbh->prepare("$query");
-       $sth->execute();
-
-       $log->trace("$query");
-
-    while ( $ref = $sth->fetchrow_hashref ) {
-        $boot_list{ $ref->{gs_name} } = $ref->{node_host};
-        $log->debug("Found $ref->{gs_name} $ref->{node_host}");
-    }
-
-    keys %boot_list;
-    while ( my ( $n, $ip ) = each %boot_list ) {
-        $log->info("Booting: $n $ip");
-
-        deployGame($n);
-        bootGame($n);
-        registerGame($n);
-    }
-    
-    
-    $log->debug("Nothing to do") if not (%boot_list);
-}
-
-
-
-#########################################################
-##               Main Utility Functions                ##
-#########################################################
 
 sub registerGame {
 
-   ## TODO: read the name gateway server from the settings table, and use bungee as default
-   ## Requires the bungeeservermanager plugin
-   ## https://www.spigotmc.org/resources/bungeeservermanager-bungeecord-mysql.24837/
-   
-    my ($name) = @_[0];
+    my %args = ( 
+        game => '', 
+        @_,         # argument pair list goes here
+    );
 
+    my $game = $args{'game'};
+    my ($islobby, $isrestricted, $cmd);
 
-    $log->info("Registering $name on the network");
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game, 
+        hash_ref    => 'true' );
+        
+    my $gateway      = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'isBungee',
+        value       => 'true', 
+        hash_ref    => 'false' );
+            
 
-    ( $islobby = true )       if     $game_settings{$name}{'is_lobby'};
-    ( $islobby = false )      if not $game_settings{$name}{'is_lobby'};
+    $log->info("Registering $game on the network");
 
-    ( $isrestricted = true )  if     $game_settings{$name}{'is_restricted'};
-    ( $isrestricted = false ) if not $game_settings{$name}{'is_restricted'};
+    $cmd = "servermanager delete " . $game . "^M";
 
-    my $cmd;
-       $cmd = "servermanager delete " . $name . "^M";
+    sendCommand( command => $cmd, game => $gateway );
+    sleep(0.5);
 
-   # sendCommand( "$cmd", $gatewayName );
+    $cmd .= "servermanager add " . $game . " ";
+    $cmd .= $settings->{$game}{'node'} . " ";
+    $cmd .= $settings->{$game}{'port'} . " ";
+    $cmd .= $settings->{$game}{'isLobby'} . " true ";
+    $cmd .= $settings->{$game}{'isRestricted'} . " " . $game;
 
-    $cmd .= "servermanager add " . $name . " ";
-    $cmd .= $game_settings{$name}{'node_host'} . " ";
-    $cmd .= $game_settings{$name}{'port'} . " ";
-    $cmd .= ${islobby} . " true ";
-    $cmd .= $isrestricted . " " . $name;
-
-    sendCommand( "$cmd", $gatewayName );
-
-    return 0;
+    sendCommand( command => $cmd, game => $gateway );
+    sleep(0.5);
+    
+    return "$game linked to $gateway network";
 }
+
 
 sub deregisterGame {
+    my %args = ( 
+        game   => '', 
+        @_,         # argument pair list goes here
+    );
+    
+    my $game = $args{'game'};
+    
+    my $gateway     = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'isBungee',
+        value       => 'true',
+        hash_ref    => 'false' );
 
-    my $name = @_[0];
-    my $cmd = "servermanager delete " . $name;
+    my $cmd = "servermanager delete " . $game;
     #my $name = $gatewayName;
-       $log->debug("Deregistering $name from the network");
+       $log->debug("Deregistering $game from the network");
        
-    sendCommand( "$cmd", $gatewayName );
+    sendCommand( game => $gateway, command => $cmd );
 
 }
 
+# getFiles(game => 'benchmark'); 
+sub getFiles {
+        my %args = ( 
+        user    => '', 
+        ip      => '',
+        game    => '',
+        @_,         # argument pair list goes here
+    );
+    
+    my $game = $args{'game'};
+    
+    my $settings    = readFromDB( 
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'true' );
+        
+    my %settings  = %$settings; 
+    
+    my $snode     = $settings->{$game}{'store'};
+    my $suser     = $settings->{$game}{'store_usr'};
+    my $spath     = $settings->{$game}{'store_path'};               
+    
+    my $sip      = readFromDB( 
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $snode,
+        hash_ref => 'false' );
+                                
+                                
+
+    my $results = {};
+    my %results = %$results;
+    
+
+    return 1 if connectSSH( user => $suser, ip => $sip );
+
+   # %SSH_connections{} is declared globally
+    my    $ssh_connection = $SSH_connections{$suser.$sip};
+    my    @files          = $ssh_connection->capture("cd $spath; find $game -type f ");
+    chomp(@files);
+
+#    for (@files) {
+#        print "$_\n";
+#    }
+    return \@files;
+}
+
+
+# sendCommand( command => 'say hello', game => 'benchmark', node => '' );
+
 sub sendCommand {
-    ## TODO: Read the correct credentials from the DB
+    my %args    = ( 
+        game    => '', 
+        command => '',
+        node    => '',
+                @_,);
     
-    my ( $this_cmd, $gs_name ) = @_;
-    my @results;
-    my $ip = $online_games{$gs_name};
+    my $game        = $args{'game'};
+    my $command     = $args{'command'};
+    my $node        = $args{'node'};
     
-    $ip         || return 1;
-    $this_cmd   || return 1;
-    
-    
-     $log->debug("Sending command: $this_cmd to $gs_name");
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'true' );
 
-    connectSSH( 'minecraft', $ip );
-     $log->debug("SSH: $ssh_connection minecraft $ip");
+    # Order of prioroty for node:- commandline, then livegames then DB
+    $node = checkIsOnline( list_by => 'node', node => '', game => $game ) unless $node;
+    $node = $settings->{$game}{'node'} unless $node;
+    
+    my $ip          = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $node,
+        hash_ref    => 'false' );        
 
-   # %ssh_connections{} is declared globally
-    my $ssh_connection = $ssh_connections{$ip};    
-       $ssh_connection->system("screen -p 0 -S $gs_name -X clear");
-       $ssh_connection->system("screen -p 0 -S $gs_name -X hardcopy");
-       $ssh_connection->system("screen -p 0 -S $gs_name -X eval 'stuff \"" . $this_cmd . "\"^M'" );
+    
+    my ($results, @results);
+    my $user = $settings->{$game}{'node_usr'};
+   
+     $log->debug("Sending command: $command to $game on $ip");
+
+    connectSSH( user => $user, ip => $ip ) ; #or die "Error establishing SSH" ;
+
+
+   # %SSH_connections{} is declared globally
+    my $ssh_connection = $SSH_connections{$user.$ip};
+       #$log->debug("SSH: $ssh_connection $user\.$ip");
+    
+       $ssh_connection->system("screen -p 0 -S $game -X clear");
+       $ssh_connection->system("screen -p 0 -S $game -X hardcopy");
+       $ssh_connection->system("screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
        
-     $log->debug( "\[$ip\] $gs_name: screen -p 0 -S $gs_name -X eval 'stuff \"" 
-          . $this_cmd
+     $log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \"" 
+          . $command
           . "\"^M'" );
           
      Time::HiRes::sleep( 0.05 );
     
-    $ssh_connection->system("screen -p 0 -S $gs_name -X hardcopy");
-    $results = $ssh_connection->capture("cat $gs_name/game_files/hardcopy.0");
+    $ssh_connection->system("screen -p 0 -S $game -X hardcopy");
+    $results = $ssh_connection->capture("cat $game/game_files/hardcopy.0");
 
-    my @results = split( '\n', $results );
-    @results =~ /\S/, @results;
-    $results =~ s/[^[:ascii:]]//g, $results;
+    @results =  split( '\n', $results );
+    $results = $results if /\S/;
+    $results = $results if s/[^[:ascii:]]//g, $results;
     foreach (@results) {
-        $log->debug("$gs_name SCREEN: $_");
+        $log->debug("$game SCREEN: $_");
     }
     
     return $results;
-}
-
-
-sub fetch_settings_from_db {
-
-    my ( $table, $index_column ) = @_;
-     $log->debug("Reading DB table: $table");
-
-    $sth = $dbh->prepare("SELECT * FROM $table");
-    $sth->execute();
-
-    while ( $ref = $sth->fetchrow_hashref() ) {
-        my $index_name = $ref->{$index_column};
-
-        foreach ( @{ $sth->{NAME} } ) {
-            my $var_name  = $_;
-            my $var_value = $ref->{$var_name};
-
-            if ( $table eq 'global_settings' ) {
-                $global_settings{$index_name}{$var_name} = $var_value;
-            }
-
-            if ( $table eq 'nodes' ) {
-                $node_settings{$index_name}{$var_name} = $var_value;
-            }
-
-            if ( $table eq 'game_servers' ) {
-                $game_settings{$index_name}{$var_name} = $var_value;
-            }
-        }
-    }
-
-    
-
-}
-
-sub debug {
-    my (%hash) = @_;
-    if ( $debug eq 'true' ) {
-        warn "debug is enabled";
-        print "----------------\n";
-        print Dumper \%hash;
-        print "----------------\n";
-    }
-}
-
-
-sub syncTime {
-    my $period = @_[0];
-   
-    $log->debug("Going back to sleep");
-    
-    while ( ( $time % $period ) != 0 ) {
-        $time = time();
-        sleep(1);
-    }
 }
 
 
@@ -408,21 +882,22 @@ sub refreshDB {
 }
 
 sub read_config_file {
-    my ($configfile) = @_[0];
+    my ($configfile) = $_[0];
+    
+    my $CONFIG;
+    open( $CONFIG, '<', $configfile ) or croak "[!!] $configfile doesn't exist";
 
-    open( CONFIG, '<', $configfile ) or croak "[!!] $configfile doesn't exist";
-
-    while (<CONFIG>) {
+    while (<$CONFIG>) {
         chomp;                 # no newline
         s/#.*//;               # no comments
         s/^\s+//;              # no leading white
         s/\s+$//;              # no trailing white
         next unless length;    # anything left?
-        ( $var, $value ) = split( /\s*=\s*/, $_, 2 );
+        my ( $var, $value ) = split( /\s*=\s*/, $_, 2 );
         $User_Preferences{$var} = $value;
     }
 
-    close(CONFIG);
+    close($CONFIG);
 
     $db_host = $User_Preferences{'db_host'};
     $db_user = $User_Preferences{'db_user'};
@@ -431,240 +906,99 @@ sub read_config_file {
 }
 
 
-sub get_game_settings_key_value {
-    ## Search settings hashs and populate specified array
-    
-    my ( $hash_ref, $key, $value, $array_ref ) = @_;
-     $log->debug("Reading gameserver $key $value from DB");
-
-    foreach my $object ( sort keys %{$hash_ref} ) {
-        foreach my $variable ( keys %{ $game_settings{$object} } ) {
-            if ( $variable eq $key ) {
-                if ( $game_settings{$object}{$variable} eq $value ) {
-                    push @{$array_ref}, $object;
-                }
-            }
-        }
-    }
-}
-
-
-sub get_node_settings_key_value {
-    ## Search settings hashs and populate specified array
-    
-    my ( $hash_ref, $key, $value, $array_ref ) = @_;
-     $log->debug("Reading node $key $value from DB");
-
-    foreach my $object ( sort keys %{$hash_ref} ) {
-        foreach my $variable ( keys %{ $node_settings{$object} } ) {
-            if ( $variable eq $key ) {
-                if ( $node_settings{$object}{$variable} eq $value ) {
-                    push @{$array_ref}, $object;
-                }
-            }
-        }
-    }
-}
-
-
 sub connectSSH {
     ## Takes username and ip, and confirms/creates a SSH connection
-    ## Stores the connection in the global %ssh_connections{}
+    ## Stores the connection in the global %SSH_connections{}
+    my %args = ( 
+        user    => '', 
+        ip      => '',
+        @_,         # argument pair list goes here
+    );
     
-    my ( $credentials, $ip ) = @_;
+    $args{'user'} || return "Aborting SSH: must specify username";
+    $args{'ip'}   || return "Aborting SSH: must specify ip";
     
-    $ip             || return 1;
-    $credentials    || return 1;
     
-    if ($ssh_connections{$ip}) {
-        $ssh_connections{$ip}->check_master;
-        $log->debug("SSH $credentials\@$ip is healthy");
+    
+    if ($SSH_connections{$args{'user'}.$args{'ip'}}) {
+        $SSH_connections{$args{'user'}.$args{'ip'}}->check_master;
+        $log->debug("SSH $args{'user'}\@$args{'ip'} is healthy");
+        return 0;
     }
     
     else {
-        $log->info("New SSH: $credentials\@$ip");
-
-        my $this_connection;
-        my $connection = $credentials . "@" . $ip;
+        $log->debug("New SSH: $args{'user'}\@$args{'ip'}");
         
-        $this_connection = Net::OpenSSH->new($connection);
-         my $error = $this_connection->error;
-
-        $log->warn("$ip: $error") if $this_connection->error;
-
-        $ssh_connections{$ip} = $this_connection;
+        my $this_connection;
+        my $connection = $args{'user'} . "@" . $args{'ip'};
+        
+        $this_connection = Net::OpenSSH->new($connection, master_opts => [-o => "PasswordAuthentication=no"]);
+         
+         
+        if ( $this_connection->error ) {
+            print "[!!] Error connecting to $args{'ip'}:" ;
+            print $this_connection->error . "\n";
+           # print Dumper $this_connection;
+            
+            return 1;
+        }
+        print "[OK] Connected to $args{'ip'}:" ;
+        $SSH_connections{$args{'user'}.$args{'ip'}} = $this_connection;
+        
+        return 0;
     }
 }
 
 
-sub clear_isOnline_table {
-
-    $log->debug("Clearing isOnline table");
-    
-    my $sth = $dbh->prepare("DROP TABLE IF EXISTS isOnline;");
-              $sth->execute();
-              
-
-    my $new_table  = 'CREATE TABLE isOnline ';
-       $new_table .= '( id int(9) NOT NULL AUTO_INCREMENT, node VARCHAR(255) NOT NULL, ';
-       $new_table .= 'checked TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, gs_name VARCHAR(255) NOT NULL, ';
-       $new_table .= 'ip VARCHAR(16) NOT NULL, online TINYINT(1) NOT NULL, mem INT NOT NULL, ';
-       $new_table .= 'cpu INT NOT NULL, UNIQUE KEY `id` (`id`)) ENGINE=InnoDB;';
-
-    $sth = $dbh->prepare("$new_table");
-           $sth->execute();
-
-
-    $insert = 'UPDATE game_servers SET online = 0, cpu = NULL, mem = NULL;';
-    
-    $sth = $dbh->prepare($insert);
-           $sth->execute();
- 
-}
-
-
-sub rotateLogTables {
-    ## TODO: Add stats logging to DB for webapp...
-}
-
-
-sub fill_isOnline_table {
-
-    my ($this_node) = @_;
-    my $this_ip = $node_settings{$this_node}{ip};
-
-    $log->debug("Games on $this_node \[$this_ip\]");
-
-    connectSSH( 'minecraft', $node_settings{$this_node}{ip} ) or next;
-
-    my $procs   = $ssh_connections{$this_ip}->capture("screen -list");
-    my @screens = split( '\n', $procs );
-       @screens = grep /[0-9]+\.[a-zA-Z0-9]/, @screens;
-
-
-    foreach my $line (@screens) {
- 
-        my @columns = split( /\s/, $line );
-        
-        my ( $screenpid, $screenname ) = split( /\./, @columns[1] );
-        my @info;
-        
-        $game_settings{$screenname} or next;
-        $online_games{$screenname} = $this_ip;
-        
-        
-
-          
-        my $insert;
-        my $epoch_time = time();
-
-        my @proc = split( ' ',
-            $ssh_connections{$this_ip}->capture("ps --no-headers --ppid $screenpid -o %cpu,rss") );
-            @proc[1] = int( @proc[1] / 1024 );
-
-
-         my $screen_log;
-         
-         if ( $screenname eq $gatewayName ) {
-            $screen_log = sendCommand( "glist",    $screenname );
-         }
-         else {
-            $screen_log  = sendCommand( "minecraft:time query gametime^Mversion^Mmemory^M",  $screenname );
-         }
-
-         my $plugins      = $game_settings{$screenname}{'node_path'} . "/";
-            $plugins     .= $screenname . "/game_files/plugins/";
-            $screen_log  .= "Plugins:\n" . $ssh_connections{$this_ip}->capture("cd $plugins; ls *jar");
-
-         foreach my $result ( split('\n', $screen_log ) ) {
-            if ( $result !~ m/command/i ) {
-                 $result =~ s/^\[[^\]]+]:/> /;
-                 $result =~ s/^/<div>/;
-                 $result =~ s/$/<\/div>/;
-                 push @info, $result;
-                   $log->trace("$result");
-             }
-            if ( $result =~ m/The time is / ) {
-                 $result =~ s/[^0-9]//g;
-                 $result = $result / 20;
-                 $result = Time::Seconds->new($result);
-                 $result = $result->pretty;
-                 push @info, "Server online for $result!";
-                   $log->trace("$result");
-            }
-         }
-
-        $result = join( '', @info );
-
-        $log->debug("\[$screenpid\] $screenname \t@proc[0]%\t@proc[1]M ");
-
-        $insert  = "INSERT INTO isOnline ( node, checked, online, gs_name, ip, cpu, mem ) ";
-        $insert .= "values ('$this_node', FROM_UNIXTIME('$epoch_time')";
-        $insert .= ", '1', '$screenname', '$this_ip', '@proc[0]', '@proc[1]')";
-        $log->trace("$insert");
-        
-       refreshDB();
-        my $sth = $dbh->prepare($insert);
-           $sth->execute();
-        
-
-        $insert  = "UPDATE game_servers SET cpu = '@proc[0]', mem = '@proc[1]', info = " . $dbh->quote($result);
-        $insert .= " WHERE gs_name = '$screenname';";
-        $log->trace("$insert");
-        
-       refreshDB();
-        my $sth = $dbh->prepare($insert);
-           $sth->execute();
-        
-
-    };
- 
-    
-    $insert  = "UPDATE game_servers INNER JOIN ";
-    $insert .= "isOnline ON game_servers.gs_name = ";
-    $insert .= "isOnline.gs_name SET game_servers.online = isOnline.online;";
-    
-    $log->trace("$insert");
-    
-    refreshDB();
-    my $sth = $dbh->prepare($insert);
-       $sth->execute();
-    
-}
-
-
+# haltGame(game => 'benchmark');
 sub haltGame {
-    my ( $this_game, $ip ) = @_;
+    my %args = ( 
+        game => '',
+        node => '', 
+        @_,         # argument pair list goes here
+    );
+    
+    my $game = $args{'game'};
+    my $node = $args{'node'};
+    
+    $log->info("Halting: $game");
 
-    $log->info("Halting: $this_game $ip");
+#    sendCommand( "servermanager kick $game^Mco purge t:90d", $gatewayName );
+#    deregisterGame( game => $game );
 
-    sendCommand( "servermanager kick $this_game^Mco purge t:90d", $gatewayName );
-    deregisterGame($this_game);
-#    sendCommand( "co purge t:90d", $this_game );
-    sleep(2);
+#    sleep(2);
 
-    storeGame($this_game);
-    sendCommand( "stop^Mend", $this_game );
-#    sendCommand( "end",  $this_game );
-    sleep(1);
+#    storeGame( game => $game );
+ 
+    sendCommand( command => "stop^Mend", game => $game, node => $node );
 
-    return 0;
+    sleep(10);
+
+    unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) ) {
+        $log->info("Halt $game succeeded");
+        return "Halt $game succeeded";
+    }
+    else {
+        $log->info("Failed to halt $game");
+        return "Failed to halt $game";
+    }
 }
 
 sub configLogger {
 
     $log_conf = q{
-        log4perl.category                  = DEBUG, Logfile, Screen, DBAppndr
+        log4perl.category                   = DEBUG, Logfile, Screen, DBAppndr
 
  
-        log4perl.appender.Logfile          = Log::Log4perl::Appender::File
-        log4perl.appender.Logfile.filename = deploy.log
-        log4perl.appender.Logfile.layout   = Log::Log4perl::Layout::PatternLayout
+        log4perl.appender.Logfile           = Log::Log4perl::Appender::File
+        log4perl.appender.Logfile.filename  = deploy.log
+        log4perl.appender.Logfile.layout    = Log::Log4perl::Layout::PatternLayout
         log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms %p %L %m %T%n 
  
-        log4perl.appender.Screen         = Log::Log4perl::Appender::Screen
-        log4perl.appender.Screen.stderr  = 0
-        log4perl.appender.Screen.layout = Log::Log4perl::Layout::SimpleLayout
+        log4perl.appender.Screen            = Log::Log4perl::Appender::Screen
+        log4perl.appender.Screen.stderr     = 0
+        log4perl.appender.Screen.layout    = Log::Log4perl::Layout::PatternLayout
+        log4perl.appender.Screen.layout.ConversionPattern = [%r|%R]ms [%p]:%L %m%n 
   
         log4perl.appender.DBAppndr            = Log::Log4perl::Appender::DBI
     };
@@ -689,128 +1023,702 @@ sub configLogger {
     };
 }
 
+# storeGame('benchmark');
 sub storeGame {
-    ## Store - pull files from node to storage
-    ## Rsync cannot move files between two remote locations
-    ## This requires we login to one, and execute rsync
-    ## as a local process. For Security the $store_host is used
-    ## providing a firewall in effect
+    my %args = ( 
+        game   => '', 
+        @_,         # argument pair list goes here
+    );
     
-    my ($gs_name) = @_;
+    my $game = $args{'game'};
+      
+    my ($user, $suser, $cp_to, $cp_from);
     
-    ## Store - Pull files from node back to storage
-    my $sip      = $game_settings{$gs_name}{"store_host"};
-    my $susr     = $game_settings{$gs_name}{"store_usr"};
-    my $cp_to    = $game_settings{$gs_name}{"store_path"} . "/";
+    return 1 unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+    
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'true' );
+        
+    my %settings = %$settings;                        
+    
+    my $ip        = readFromDB( table => 'nodes',
+                               column => 'ip',
+                                field => 'name',
+                                value => $settings{$game}{'node'},
+                             hash_ref => 'false' );
+    
+    my $sip       = readFromDB( table => 'nodes',
+                               column => 'ip',
+                                field => 'name',
+                                value => $settings{$game}{'store'},
+                             hash_ref => 'false' );
 
-    my $cp_from  = $game_settings{$gs_name}{"node_usr"} . "@";
-       $cp_from .= $online_games{$gs_name} . ":";
-       $cp_from .= $game_settings{$gs_name}{"node_path"} . "/" . $gs_name;
 
-    $log->info("Storing: $gs_name as $susr\@$sip");
+    $log->info("deployGamerserver: $game");
+
+    $user        = $settings{$game}{"node_usr"};
+    $suser       = $settings{$game}{"store_usr"};
+
+    $cp_from    = $user . "@" . $ip . ":";
+    $cp_from   .= $settings{$game}{"node_path"} . "/". $game;
+
+    $cp_to      = $settings{$game}{"store_path"} . "/" ;
+
     $log->debug(" $cp_from $cp_to ");
-    
-    connectSSH( $susr, $sip );
 
-    sendCommand( "say Backup in progress. Server going readonly...", $gs_name );
-    sendCommand( "save-off",                                         $gs_name );
-    sendCommand( "save-all",                                         $gs_name );
-
-    sleep(2);
+    my $output = connectSSH( user => $suser, ip => $sip ) . "\n";
 
     $log->debug("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to");
-    $ssh_connections{$sip}->system("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to");
+    $output .= $SSH_connections{$suser.$sip}->capture("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to");
 
-    sendCommand( "save-on",             $gs_name );
-    sendCommand( "say Backup finished", $gs_name );
-
-    return 0;
+    return $output;
 }
 
+# bootGame('benchmark');
 sub bootGame {
-
-    my $gs_name = @_[0];
+    my %args = ( 
+        game   => '', 
+        @_,         # argument pair list goes here
+    );
     
-    $log->info("Booting: $gs_name");
-
-    my $usr = $game_settings{$gs_name}{"node_usr"};
-    my $ip  = $game_settings{$gs_name}{"node_host"};
-    my $bin = $game_settings{$gs_name}{"server_bin"};
-
+    my $game = $args{'game'};
+    
+    my ($user, $suser, $cp_to, $cp_from);
+    
+    return "$game is already online" if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+    
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'true' );
+        
+    my %settings    = %$settings;                        
+    
+    my $ip          = readFromDB( 
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $settings{$game}{'node'},
+        hash_ref    => 'false' );
+                                 
     my $invocation;
-       $invocation  = "cd " . $game_settings{$gs_name}{'node_path'};
-       $invocation .= "/" . $gs_name . "/game_files";
-       $invocation .= " && screen -h 1024 -L -dmS " . $gs_name;
-       $invocation .= " " . $game_settings{$gs_name}{'java_bin'};
-       $invocation .= " -Xms" . $game_settings{$gs_name}{'mem_min'} . "M";
-       $invocation .= " -Xmx" . $game_settings{$gs_name}{'mem_max'} . "M";
-       $invocation .= " " . $game_settings{$gs_name}{'java_flags'};
-       $invocation .= " -jar " . $game_settings{$gs_name}{'server_bin'};
+       $invocation  = "cd " . $settings{$game}{'node_path'};
+       $invocation .= "/" . $game . "/game_files";
+       $invocation .= " && screen -h 1024 -L -dmS " . $game;
+       $invocation .= " " . $settings{$game}{'java_bin'};
+       $invocation .= " -Xms" . $settings{$game}{'mem_min'} . "M";
+       $invocation .= " -Xmx" . $settings{$game}{'mem_max'} . "M";
+       $invocation .= " " . $settings{$game}{'java_flags'};
+       $invocation .= " -jar " . $settings{$game}{'server_bin'};
        $invocation .= " --forceUpgrade";
-       $invocation .= " --port " . $game_settings{$gs_name}{'port'};
+       $invocation .= " --port " . $settings{$game}{'port'};
        $invocation .= " nogui server";
        $invocation =~ s/\n+/ /g;
 
     $log->trace("$invocation");
-
-    connectSSH( $usr, $ip );
-    $ssh_connections{$ip}->system("$invocation");
+    $user = $settings->{$game}{'node_usr'};
+    
+    my $output = connectSSH( user => $user, ip => $ip );
+    $SSH_connections{$user.$ip}->system("$invocation");
 
     sleep(10);
 
-    my $screen = $ssh_connections{$ip}->capture("screen -list");
-    
-    if ( !grep /$gs_name/i, $screen ) {
-    
-        $log->warn("!! Server failed to boot !!");
-        
-        my $screen_log  = $game_settings{$gs_name}{'node_path'} . "/";
-           $screen_log .= $gs_name . "/game_files/screenlog.0";
-        my $failed      = $ssh_connections{$ip}->capture("tail $screen_log");
+    if ( checkIsOnline( list_by => 'game', node => '', game => $game ) ) {
+        $log->info("Started $game");
+        return "$game is Online";
+    }
+    else {
+        $log->info("Failed to start $game");
+        return "Starting $game failed";
+    }
+}
 
-        @results = split( /\n/, $failed );
-        foreach (@results) {
-            $log->warn("$_");
-        }
+#deployGame('benchmark');
+sub deployGame {
+    my %args = ( 
+        game   => '',  
+        @_,         # argument pair list goes here
+    );
+    
+    my $game = $args{'game'};
+    
+    my ($user, $suser, $cp_to, $cp_from);
+    
+    return 1 if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+    
+    my  $settings = readFromDB( table => 'games',
+                               column => 'name',
+                                field => 'name',
+                                value => $game,
+                             hash_ref => 'true' );
+    my %settings = %$settings;                        
+    
+    my $ip        = readFromDB( table => 'nodes',
+                               column => 'ip',
+                                field => 'name',
+                                value => $settings{$game}{'node'},
+                             hash_ref => 'false' );
+    
+    my $sip       = readFromDB( table => 'nodes',
+                               column => 'ip',
+                                field => 'name',
+                                value => $settings{$game}{'store'},
+                             hash_ref => 'false' );
+                             
+    
+    $log->info("deployGamerserver: $game");
+
+    $user        = $settings{$game}{"node_usr"};
+    $suser       = $settings{$game}{"store_usr"};
+
+    $cp_to      = $user . "@" . $ip . ":";
+    $cp_to     .= $settings{$game}{"node_path"} . "/";
+
+    $cp_from    = $settings{$game}{"store_path"} . "/" . $game;
+
+
+    my $rsync_cmd = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to";
+    $log->debug(" $rsync_cmd ");
+
+     unless ( connectSSH( user => $suser, ip => $sip ) ) {
+        my $output = $SSH_connections{$suser.$sip}->capture("$rsync_cmd");
+        return $output;
+    }
+    else {
         return 1;
     }
-    return 0;
 }
 
+app->start;
 
-sub deployGame {
-    ## Deploy - push file from storage to node
-    ## Rsync cannot move files between two remote locations
-    ## This requires we login to one, and execute rsync
-    ## as a local process
+
+__DATA__
+
+
+@@ layouts/default.html.ep
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/js/bootstrap.bundle.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.css">
+
+</head>
+
+</div>
+<body>
+  <style>
+    body  {
+        background-image: url("http://www.splatage.com/wp-content/uploads/2021/06/download-wallpaper-x-minecraft-backgroung-green-full-hd-p-hd-background-1478263362k8n4g.jpg");
+        background-size: cover;
+        background-repeat: repeat-x;
+        background-attachment: fixed;
+
+    }
+  </style>
+<nav class="navbar navbar-expand-lg sticky-top navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">
+      <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
+    </a>
     
-    my ($gs_name) = @_;
-    my $ip = $online_games{$gs_name};
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" 
+     data-bs-target="#navbarNav" aria-controls="navbarNav" 
+     aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav">
+        <li class="nav-item">
+          <a class="nav-link active" aria-current="page" href="/">home</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/yancy">settings</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/minion">minion</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="https://stats.splatage.com">stats</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="https://www.splatage.com">www</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="https://discord.com/channels/697634318067040327/697634318608236556">discord</a>
+        </li>      
+      </ul>
+    </div>
+  </div>
+</nav>
 
-    $log->info("deployGamerserver: $gs_name");
 
-    my $usr     = $game_settings{$gs_name}{"node_usr"};
-    my $ip      = $game_settings{$gs_name}{"node_host"};
+  <div height: 100%;>
+    <main class="container bg-secondary shadow-lg p-3 mb-5 mt-4 bg-body rounded" style="--bs-bg-opacity: .95;">
+        %= content
+    </main>
+  </div>
+</body>
+</html>
 
-    my $susr    = $game_settings{$gs_name}{"store_usr"};
-    my $sip     = $game_settings{$gs_name}{"store_host"};
 
-    my $cp_to   = $usr . "@" . $game_settings{$gs_name}{"node_host"} . ":";
-       $cp_to  .= $game_settings{$gs_name}{"node_path"} . "/";
 
-    my $cp_from = $game_settings{$gs_name}{"store_path"} . "/" . $gs_name;
 
-    $log->trace(" $cp_from $cp_to ");
-
-    connectSSH( $susr, $sip );
-     $ssh_connections{$sip}->system("rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to");
+@@ node.html.ep
+% layout 'default';
+<!DOCTYPE html>
+<html>
+  <body>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+        <div class="alert alert-success" role="alert">
+          <h4 class="alert-heading">Control Games on Node</h4>
+        </div>
       
-     $log->debug("rsync -auv --delete $cp_from $cp_to");
+        % my %nodes   = %$nodes;
+        % my %history = %$history;
+        % my %expected = %$expected;
+      
+        % for my $node (sort keys %$nodes) {
+          % if ( ! $nodes{$node}{'offline'} ) {
 
-    return 0;
+
+            <div class="media mt-2">
+                <img class="align-self-top mr-1 mt-2 mb-2" 
+                  src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
+                  alt="Generic placeholder image" height="80">
+                </img> 
+                <h3>
+                    <%= $node %>
+                </h3>
+            </div>
+
+            <hr>
+
+            % for my $game (sort keys %{$nodes{$node}}) {        
+            <div class="row">
+           
+                % my $online       = 'true'; # = $node{$game}{'online'};
+                % my $isLobby     = 'false'; # = $node{$game}{'isLobby'};
+                % my $isRestricted = 'false'; # = $node{$game}{'isRestricted'};
+                   
+                <div class="col d-flex justify-content-start mb-2 shadow">
+                    
+                      <div class="media" >
+                      <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
+                        <img class="zoom align-self-top mr-3" 
+                          src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+                          alt="Generic placeholder image" height="35">
+                        </image>
+                      </a>
+                      <a href="/log/<%= $node %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+                        <img class="zoom align-self-top mr-3" 
+                          src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
+                          alt="Generic placeholder image" height="35">
+                        </image>
+                      </a>
+                        <img class="align-self-top mr-3" 
+                          src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
+                          alt="Generic placeholder image" height="30">
+                          </h4> <%= $game %> </h4>
+                        </image>
+                      </div>
+                </div>
+            
+                % if (app->minion->lock($game, 0)) {
+                <div class="col d-flex justify-content-end mb-2 shadow">
+                    <a class="ml-1 btn btn-sm btn-outline-dark       
+                        justify-end" href="/update/<%= $game %>/<%= $node %>"    role="button">Update</a>
+                    <a class="ml-1 btn btn-sm btn-outline-secondary  
+                        justify-end" href="/deploy/<%= $game %>/<%= $node %>"    role="button">Deploy</a>
+                    <a class="ml-1 btn btn-sm btn-outline-secondary  
+                        justify-end" href="/store/<%= $game %>/<%= $node %>"     role="button">Store</a>
+                    <a class="ml-1 btn btn-sm btn-outline-info       
+                        justify-end" href="/link/<%= $game %>/<%= $node %>"      role="button">Link</a>
+                    <a class="ml-1 btn btn-sm btn-outline-info       
+                        justify-end" href="/drop/<%= $game %>/<%= $node %>"      role="button">Drop</a>
+                    <a class="ml-1 btn btn-sm btn-outline-success    
+                        justify-end" href="/boot/<%= $game %>/<%= $node %>"      role="button">Boot</a>
+                    <a class="ml-1 btn btn-sm btn-outline-danger     
+                        justify-end" href="/halt/<%= $game %>/<%= $node %>"      role="button">Halt</a>
+                </div>
+                % } else {                    
+                    <div class="col d-flex justify-content-end mb-2 shadow">
+                        <a class="ml-1 btn btn-sm btn-outline-success     
+                        justify-end" href="/minion/locks"      role="button">locked while task is running</a>
+                    </div>
+                % }        
+            </div>   
+            % }
+            <hr>
+
+   <h5>offline</h5>
+            % for my $game (sort keys %{$expected}) {     
+                % if ( $expected{$game}{'node'} eq $node && ! ${nodes}{$node}{$game}{'pid'} ) {
+             
+                <div class="row">
+                   <div class="col d-flex justify-content-start mb-2 shadow ">
+                    <div class="media" >
+                      <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
+                        <img class="zoom align-self-top mr-3" 
+                          src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+                          alt="Generic placeholder image" height="35">
+                        </image>
+                      </a>
+                      <a href="/log/<%= $node %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+                        <img class="zoom align-self-top mr-3" 
+                          src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
+                          alt="Generic placeholder image" height="35">
+                        </image>
+                      </a>
+                        <img class="align-self-top mr-3" 
+                          src="http://www.splatage.com/wp-content/uploads/2022/08/c_icon-1.png"
+                          alt="Generic placeholder image" height="40">
+                          </h4> <%= $game %> </h4>
+                        </image>
+                      </div>
+                  
+
+
+                    % if (app->minion->lock($game, 0)) {
+                        <div class="col d-flex justify-content-end mb-2 shadow">
+                            <a class="ml-1 btn btn-sm btn-outline-dark       
+                                justify-end" href="/update/<%= $game %>/<%= $node %>"    role="button">Update</a>
+                            <a class="ml-1 btn btn-sm btn-outline-secondary  
+                                justify-end" href="/deploy/<%= $game %>/<%= $node %>"    role="button">Deploy</a>
+                            <a class="ml-1 btn btn-sm btn-outline-secondary  
+                                justify-end" href="/store/<%= $game %>/<%= $node %>"     role="button">Store</a>
+                            <a class="ml-1 btn btn-sm btn-outline-info       
+                                justify-end" href="/link/<%= $game %>/<%= $node %>"      role="button">Link</a>
+                            <a class="ml-1 btn btn-sm btn-outline-info       
+                                justify-end" href="/drop/<%= $game %>/<%= $node %>"      role="button">Drop</a>
+                            <a class="ml-1 btn btn-sm btn-outline-success    
+                                justify-end" href="/boot/<%= $game %>/<%= $node %>"      role="button">Boot</a>
+                            <a class="ml-1 btn btn-sm btn-outline-danger     
+                                justify-end" href="/halt/<%= $game %>/<%= $node %>"      role="button">Halt</a>
+                        </div>
+                    % } else {
+                    <div class="col d-flex justify-content-end mb-2 shadow">
+                        <a class="ml-1 btn btn-sm btn-outline-success     
+                        justify-end" href="/minion/locks"      role="button">locked while task is running</a>
+                    </div>
+                    % }
+                    </div>
+                </div>  
+                % }
+            %}
+        % }
+    % }
+  
+
+
+<!--
+<hr>
+<h2> Expected </h2>
+<%= dumper{%$expected} %>
+<hr>
+<hr>
+<h2> Nodes </h2>
+<%= dumper{%$nodes} %>
+<hr>
+-->
+    </div>  
+</body>
+</html>
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+<script type="text/javascript">
+  $(document).ready(function () {
+    %# Scroll down to the bottom
+   <!--  $('html, body').animate({scrollTop: $(document).height()},'slow'); -->
+
+    %# Schedule the first update in five seconds
+    setTimeout("updatePage()",10000);
+  });
+
+  %# This function will update the page
+  function updatePage () {
+    $('#command-content').load(location.reload(true) + ' #command-content>div');
+    $('html, body').animate({scrollTop: $(document).height()});
+
+    %# Schedule the next update in five seconds
+    setTimeout("updatePage()",10000);
+  }
+
+</script>
+<script>
+    document.addEventListener("DOMContentLoaded", function (event) {
+        var scrollpos = sessionStorage.getItem('scrollpos');
+        if (scrollpos) {
+            window.scrollTo(0, scrollpos);
+            sessionStorage.removeItem('scrollpos');
+        }
+    });
+
+    window.addEventListener("beforeunload", function (e) {
+        sessionStorage.setItem('scrollpos', window.scrollY);
+    });
+</script>
+<style>
+.zoom {
+  padding: 1px;
+  transition: transform .2s; /* Animation */
+  width: 30px;
+  height: 30px;
+  margin: 0 auto;
+}
+
+.zoom:hover {
+  transform: scale(2.5); /* (150% zoom - Note: if the zoom is too large, it will go outside of the viewport) */
+}
+</style>
+
+%= javascript begin
+    // Automatically submit the form when an input changes
+    $( 'form input' ).change( function ( e ) {
+        $(this).parents("form").submit();
+    } );
+% end
+
+
+
+
+@@ index.html.ep
+% layout 'default';
+<!DOCTYPE html>
+<html>
+
+  <div class="alert alert-success" role="alert">
+    <h4 class="alert-heading">Current Online Nodes and Game Servers</h4>
+  </div>
+
+<body class="m-0 border-0">
+  <div class="container-fluid text-left">
+    <div class="row justify-content-start">
+      
+      
+      % my %nodes    = %$nodes;
+      % my %expected = %$expected;
+      % for my $node (sort keys %$nodes) {
+      % if ( ! $nodes{$node}{'offline'} ) {
+
+        <div class="col shadow bg-medium mt-4 rounded">  
+     
+          <div class="media mt-2">
+
+            <img class="align-self-top mr-1 mt-2 mb-2" 
+              src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
+              alt="Generic placeholder image" height="80">
+                <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
+                
+                  <%= $node %>
+
+                </a>
+             </img>  
+
+                <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
+                  % for my $game (sort keys %{$nodes{$node}}) {
+                    % if ( $game ne 'offline' ) {
+                                
+                      <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
+                           <span class="badge badge-primary text-dark">
+                       <%= $game %></span>
+                        <span style="float:right; mr-1" class="mr-1 fs-6">
+                        <small>
+                           <%= int($nodes->{$node}->{$game}->{'pcpu'} + 0.5) %>% |
+                           <%= int($nodes->{$node}->{$game}->{'rss'}/1024 + 0.5) %>M
+                        </small>
+                        </span>
+                      </a>
+                    % }
+                  % }
+                </div>
+                
+           
+           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">     
+                %for my $game (sort keys %{$expected}) {
+                    % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) { 
+                    
+                     <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
+                           <span class="badge badge-primary text-dark">
+                       <%= $game %></span>
+                        <span style="float:right; mr-1" class="mr-1">
+                        <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
+                        </span>
+                   
+                      </a>
+            % }
+        % }
+            </div>
+           </div>
+         </div>       
+         % }
+        % }
+        <hr>
+        
+      
+
+<!--
+<hr>
+<%= dumper{%$expected} %>
+<hr>
+-->
+  </div>
+</body>
+</html>
+
+
+
+
+@@ log.html.ep
+
+<!DOCTYPE html>
+<html>
+  <head>
+    %# This tells phone browsers not to scale out
+   %# when first loaded
+
+    <meta name="viewport" content="initial-scale=1.0"/>
+    <title>splatage.com term</title>
+
+  </head>
+   <meta name="viewport" content="initial-scale=1.0"/>
+<body class="m-0 border-0">
+  <style type="text/css">
+
+  body {
+  word-wrap: break-word;
+  color: #00ff00;
+  background-image: radial-gradient(
+    rgba(0, 150, 0, 0.75), black 120%
+  );
+
+  margin: 0;
+
+  padding: 2rem;
+  color: lime;
+  font: 1rem Inconsolata, monospace;
+  text-shadow: 0 0 5px #C8C8C8;
+  &::after {
+    content: "";
+
+    top: 0;
+    left: 0;
+
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(black, 0.15),
+      rgba(black, 0.15) 1px,
+      transparent 1px,
+      transparent 2px
+    );
+    pointer-events: none;
+  }
+}
+::selection {
+  background: #0080FF;
+  text-shadow: none;
+}
+pre {
+  margin: 0;
+}
+
+#header {
+  display: flex;
+  align-items: baseline;
+  margin: 0;
+  font: 1rem Inconsolata, monospace;
+  text-shadow: 0 0 5px #C8C8C8; 
 }
 
 
-## Clean up any DB connections on exit
-$sth->finish();
-$dbh->disconnect();
+ /* blinking cursor */
+#cursor {
+  background: lime;
+  line-height: 15px;
+  margin-left: 3px;
+  -webkit-animation: blink 0.8s infinite;
+  width: 7px;
+  height: 15px;
+}
+
+@-webkit-keyframes blink {
+  0% {background: #222}
+  50% {background: lime}
+  100% {background: #222}
+}
+</style>
+
+<%== $log_data %>
+<div id="header"> <p>minecraft@<%= $node %>:~$ tail -f <%= $game %>.log </p><div id="cursor"></div></div>
+</body>
+</html>
+
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+<script type="text/javascript">
+  $(document).ready(function () {
+    %# Scroll down to the bottom
+    $('html, body').animate({scrollTop: $(document).height()},'slow');
+
+    %# Schedule the first update in five seconds
+    setTimeout("updatePage()",30000);
+  });
+
+  %# This function will update the page
+  function updatePage () {
+    $('#command-content').load(location.reload(true) + ' #command-content>div');
+    $('html, body').animate({scrollTop: $(document).height()});
+
+    %# Schedule the next update in five seconds
+    setTimeout("updatePage()",30000);
+  }
+
+</script>
+<script>
+    document.addEventListener("DOMContentLoaded", function (event) {
+        var scrollpos = sessionStorage.getItem('scrollpos');
+        if (scrollpos) {
+            window.scrollTo(0, scrollpos);
+            sessionStorage.removeItem('scrollpos');
+        }
+    });
+
+    window.addEventListener("beforeunload", function (e) {
+        sessionStorage.setItem('scrollpos', window.scrollY);
+    });
+</script>
+
+
+@@ files.html.ep
+% layout 'default';
+<!DOCTYPE html>
+
+<html>
+  <body>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+        <div class="alert alert-success" role="alert">
+          <h4 class="alert-heading">Game</h4>
+        </div>
+      % my @files = @$files; 
+
+<h2> Files </h2>
+<%= @files %> and directories
+
+% foreach my $line (@files) { 
+<div> <%= $line %> </div> 
+%    } 
+<hr>
+
+
+    </div>  
+</body>
+</html>
+
