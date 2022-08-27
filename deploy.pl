@@ -1,11 +1,14 @@
 
 use v5.28;
-use Mojolicious::Lite -signatures;
+use Mojolicious::Lite -signatures; #, -async_await;
 use Mojo::mysql;
+# use Mojo::Base 'Mojolicious::Controller';
+# use Future::AsyncAwait;
 use Minion;
 use Net::OpenSSH;
 use DBD::mysql;
 use DBI;
+# use DBIx::Class::ResultSet;
 use Carp         qw( croak );
 use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
@@ -13,6 +16,7 @@ use Time::Piece;
 use Time::Seconds;
 use Net::Ping;
 use Log::Log4perl;
+use Crypt::PBKDF2;
 
 use File::Basename;
 use lib dirname (__FILE__) . "/lib/Game";
@@ -111,8 +115,9 @@ get '/update/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
     my $node = $c->stash('node');
       
-    $c->minion->enqueue($task => [$game]);
-
+   # $c->minion->enqueue($task => [$game],{queue => $game}); 
+    $c->minion->enqueue($task => [$game],{attempts => 2});
+    $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(update => sub ($job, $game) {
@@ -139,8 +144,10 @@ get '/boot/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
       
-        $c->minion->enqueue($task => [$game]);
-
+       # $c->minion->enqueue($task => [$game],{queue => $game}); 
+    $c->minion->enqueue($task => [$game],{attempts => 1});
+    
+    $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(boot => sub ($job, $game) {
@@ -158,7 +165,12 @@ app->minion->add_task(boot => sub ($job, $game) {
         $job->note(register => $regist);
 
     $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed"});
+    unless ($boot) {
+        $job->finish({message => "$task $game completed"});
+    } 
+    else {
+        $job->fail({message => "$task $game failed"});
+    }
     app->minion->unlock($lock);
 });
 
@@ -170,8 +182,9 @@ get '/halt/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
       
-        $c->minion->enqueue($task => [$game]);
-
+       # $c->minion->enqueue($task => [$game],{queue => $game}); 
+    $c->minion->enqueue($task => [$game],{attempts => 2});
+    $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(halt => sub ($job, $game) {
@@ -199,8 +212,9 @@ get '/deploy/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
       
-        $c->minion->enqueue($task => [$game]);
-
+       # $c->minion->enqueue($task => [$game],{queue => $game}); 
+    $c->minion->enqueue($task => [$game],{attempts => 2});
+    $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(deploy => sub ($job, $game) {
@@ -226,8 +240,9 @@ get '/store/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
       
-        $c->minion->enqueue($task => [$game]);
-
+       # $c->minion->enqueue($task => [$game],{queue => $game}); 
+    $c->minion->enqueue($task => [$game],{attempts => 2});
+    $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(store => sub ($job, $game) {
@@ -252,9 +267,11 @@ get '/link/:game/:node' => sub ($c) {
     my $task = 'link';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
+     
       
-        $c->minion->enqueue($task => [$game]);
-
+       # $c->minion->enqueue($task => [$game],{queue => $game}); 
+    $c->minion->enqueue($task => [$game],{attempts => 2});
+    $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(link => sub ($job, $game) {
@@ -265,8 +282,9 @@ app->minion->add_task(link => sub ($job, $game) {
 
     $job->app->log->info("Job: $task $game begins");
     sleep 1;
-        
-    #Do Stuff here
+    
+      my $regist = registerGame(game => $game);
+        $job->note(register => $regist);
 
     $job->app->log->info("$task $game completed");
     $job->finish({message => "$task $game completed"});
@@ -281,8 +299,9 @@ get '/drop/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
       
-    $c->minion->enqueue($task => [$game]);
-
+   # $c->minion->enqueue($task => [$game],{queue => $game}); 
+    $c->minion->enqueue($task => [$game],{attempts => 2});
+    $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(drop => sub ($job, $game) {
@@ -319,10 +338,24 @@ plugin Yancy => {
     schema => {
         games => {
             # Show these columns in the Yancy editor
-            'x-list-columns' => [qw( name enabled node store mem_max server_bin )],
+            'x-list-columns'    => [qw( name enabled node store mem_max server_bin )],
         },
+        nodes => {
+            'x-list-clomuns'    => [qw( name ip enabled isGateway )],
+        },
+        
+        gs_plugin_settings      => { 'x-hidden' => 'true' },
+        global_settings         => { 'x-hidden' => 'true' },
+        minion_jobs_depends     => { 'x-ignore' => 'true'},
+        minion_workers_inbox    => { 'x-ignore' => 'true'},
+        mojo_pubsub_subscribe   => { 'x-ignore' => 'true'},
+        isOnline => { 'x-ignore' => 'true'}, 
     },
 };
+
+
+
+
 
 
 
@@ -334,13 +367,16 @@ plugin Yancy => {
 
 
 
+
+
+
 get '/' => sub ($c) {
-    my  $results        = checkIsOnline( 
+    my $results         =  checkIsOnline( 
         list_by         => 'node', 
         node            => '',
         game            => '' );
     
-    my  $expected       = readFromDB( 
+    my $expected        =  readFromDB( 
         table           => 'games',
         column          => 'name',
         hash_ref        => 'true' );
@@ -407,6 +443,236 @@ get '/files/:game'      => sub ($c) {
     $c->render(template => 'files' );
 };
 
+get '/debug/:node/:game' => sub ($c) {
+    my $node            = $c->stash('node');
+    my $game            = $c->stash('node');
+    my ($results, $expected);
+           
+    my $is_configured   = readFromDB( 
+        table           => 'games',
+        column          => 'name',
+        field           => 'name',
+        value           => $game,
+        hash_ref        => 'false' );
+
+   
+    my $jobs            = app->minion->jobs({
+        queues          => ['default'], 
+        states          => ['active', 'locked'], 
+        tasks           => ['boot', 'halt'] });
+   
+    $c->render(template => 'node', 
+        nodes           => $results, 
+        history         => $jobs, 
+        expected        => $expected);
+};
+
+get '/move/:node/:game' => sub ($c) {
+    my $node            = $c->stash('node');
+    my $game            = $c->stash('node');
+    my ($results, $expected);
+           
+    my $is_configured   = readFromDB( 
+        table           => 'games',
+        column          => 'name',
+        field           => 'name',
+        value           => $game,
+        hash_ref        => 'false' );
+
+   
+    my $jobs            = app->minion->jobs({
+        queues          => ['default'], 
+        states          => ['active', 'locked'], 
+        tasks           => ['boot', 'halt'] });
+   
+    $c->render(template => 'node', 
+        nodes           => $results, 
+        history         => $jobs, 
+        expected        => $expected);
+};
+
+
+
+###########################################################
+##  Authentication
+###########################################################
+get '/login' => sub ($c) {
+
+    $c->render(
+        template => 'login',
+        error    => $c->flash('error')
+    );
+};
+post '/login' => sub ($c) {
+    refreshDB();
+    my $username = $c->param('username');                               # From the form
+    my $password = $c->param('password');                               # From the form
+
+    my $db_object = $c->app->{_dbh};
+
+    $c->app->plugin('authentication' => {
+        autoload_user   => 1,
+        wickedapp       => 'YouAreLogIn',
+        load_user       => sub {
+            my ($c, $user_key) = @_;
+            my @user = $db_object->resultset('User')->search({
+                id => $user_key
+            });
+
+            return \@user;
+        },
+        validate_user   => sub { 
+            my ($c, $username, $password) = @_; 
+
+            my $user_key = validate_user_login($db_object, $username, $password);
+
+            if ( $user_key ) {
+                $c->session(user => $user_key);
+                return $user_key;
+            }
+            else {
+                return undef;
+            }
+        },
+    });
+
+    my $auth_key = $c->authenticate($username, $password );
+
+    if ( $auth_key )  {
+        $c->flash( message => 'Login Success.');
+        return $c->redirect_to('/');
+    }
+    else {
+        $c->flash( error => 'Invalid username or password.');
+        $c->redirect_to('login');
+    }
+};
+
+# Validate user from database
+sub validate_user_login {
+    refreshDB();
+    my ($username, $password) = @_;
+    
+        my $user = readFromDB(
+        table       => 'user',
+        column      => 'id', 
+        field       => 'email', 
+        value       => $username,
+        hash_ref    => 'true'
+        );
+        
+
+
+    if (! $user->{$user}{'password'} ) {
+        return 1;
+    }
+    else {        
+        return ( validate_password( 
+            $user->{$user}{'password'}, $password ) 
+        ) ? $user->{$user}{'id'} : 0;
+    }
+};
+
+# To validate the Password
+sub validate_password {
+    my ($user_pass, $password) = @_;
+
+    my $pbkdf2 = Crypt::PBKDF2->new(
+        hash_class => 'HMACSHA1', 
+        iterations => 1000,       
+        output_len => 20,        
+        salt_len => 4,           
+    );
+
+    if ( $pbkdf2->validate($user_pass, $password) ) {
+        return 1
+    }
+};
+
+
+#get '/register' => sub(
+#    controller => 'RegistrationController', action => 'register'
+#);
+
+get '/register' => sub ($c) {
+    $c->render(
+        template => 'register',
+        error    => $c->flash('error'),
+        message  => $c->flash('message'),
+    );
+};
+
+post '/register' => sub ($c) {
+    my $email = $c->param('username');
+    my $password = $c->param('password');
+    my $confirm_password = $c->param('confirm_password');
+    my $first_name = $c->param('firstName');
+    my $middle_name = $c->param('middleName');
+    my $last_name = $c->param('lastName');
+
+    if (! $email || ! $password || ! $confirm_password || ! $first_name || ! $last_name) {
+        $c->flash( error => 'Username, Password, First Name and Last Name are the mandatory fields.');
+        $c->redirect_to('register');
+    }
+
+    if ($password ne $confirm_password) {
+        $c->flash( error => 'Password and Confirm Password must be same.');
+        $c->redirect_to('register');
+    }
+
+    my $dbh = $c->app->{_dbh};
+
+    my $user = readFromDB(
+        table       => 'user',
+        column      => 'email', 
+        field       => 'email', 
+        value       => $email,
+        hash_ref    => 'false'
+                  );
+
+    if (! $user ) {
+        eval {
+            $dbh->resultset('user')->create({ 
+                email       => $email,
+                password    => generate_password($password),
+                first_name  => $first_name,
+                middle_name => $middle_name,
+                last_name   => $last_name,
+                status      => 1
+            });
+        };
+        if ($@) {
+            $c->flash( error => 'Error in db query. Please check mysql logs.');
+            $c->redirect_to('register');
+        }
+        else {
+            $c->flash( message => 'User added to the database successfully.');
+            $c->redirect_to('register');
+        }
+    }
+    else {
+        $c->flash( error => 'Username already exists.');
+        $c->redirect_to('register');
+    }
+};
+
+sub generate_password {
+    my $password = shift;
+
+    my $pbkdf2 = Crypt::PBKDF2->new(
+        hash_class => 'HMACSHA1', 
+        iterations => 1000,       
+        output_len => 20,         
+        salt_len   => 4,         
+    );
+
+    return $pbkdf2->generate($password);
+};
+
+
+###########################################################
+##    Functions
+###########################################################
 
 sub readLog {
         my %args = ( 
@@ -454,7 +720,7 @@ sub readLog {
     connectSSH( user => $user, ip => $ip ) ;
     
     my $cmd     = "[ -f ~/$game/game_files/screenlog.0 ] ";
-       $cmd    .= "&& tail -10000 ~/$game/game_files/screenlog.0 | tac | ";
+       $cmd    .= "&& tail -5000 ~/$game/game_files/screenlog.0 | tac | ";
        $cmd    .= "sed '/Starting minecraft\\\|Enabled Waterfall/q' | tac";
     
     my $log     = $SSH_connections{$user.$ip}->capture("$cmd");
@@ -475,6 +741,8 @@ sub readLog {
 
 sub readFromDB {
 
+    refreshDB();
+    
     my %args = (
         table       => '', 
         column      => '', 
@@ -609,7 +877,11 @@ sub checkIsOnline {
         my $ip = $enabledNodes{$this_node}{'ip'};
         
 
-        next if connectSSH( user => $user, ip => $ip );
+        if ( connectSSH( user => $user, ip => $ip ) ) {
+            $return_hash{$this_node} = { };
+            next;
+        }
+        
         $return_hash{$this_node} = {};
          
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
@@ -703,15 +975,22 @@ sub registerGame {
         table       => 'games',
         column      => 'name',
         field       => 'isBungee',
-        value       => 'true', 
+        value       => '1', 
         hash_ref    => 'false' );
-            
+        
+    my $node        = readFromDB(
+        table       => 'games',
+        column      => 'node',
+        field       => 'isBungee',
+        value       => '1', 
+        hash_ref    => 'false' );
+                    
 
-    $log->info("Registering $game on the network");
+    $log->debug("Registering $game on the network with $gateway");
 
     $cmd = "servermanager delete " . $game . "^M";
 
-    sendCommand( command => $cmd, game => $gateway );
+    sendCommand( command => $cmd, game => $gateway, node => $node );
     sleep(0.5);
 
     $cmd .= "servermanager add " . $game . " ";
@@ -720,7 +999,7 @@ sub registerGame {
     $cmd .= $settings->{$game}{'isLobby'} . " true ";
     $cmd .= $settings->{$game}{'isRestricted'} . " " . $game;
 
-    sendCommand( command => $cmd, game => $gateway );
+    sendCommand( command => $cmd, game => $gateway, node => $node );
     sleep(0.5);
     
     return "$game linked to $gateway network";
@@ -739,14 +1018,20 @@ sub deregisterGame {
         table       => 'games',
         column      => 'name',
         field       => 'isBungee',
-        value       => 'true',
+        value       => '1',
+        hash_ref    => 'false' );
+    my $node        = readFromDB(
+        table       => 'games',
+        column      => 'node',
+        field       => 'isBungee',
+        value       => '1',
         hash_ref    => 'false' );
 
     my $cmd = "servermanager delete " . $game;
     #my $name = $gatewayName;
        $log->debug("Deregistering $game from the network");
        
-    sendCommand( game => $gateway, command => $cmd );
+    sendCommand( game => $gateway, command => $cmd, node => $node );
 
 }
 
@@ -801,13 +1086,14 @@ sub getFiles {
 }
 
 
-# sendCommand( command => 'say hello', game => 'benchmark', node => '' );
+# s command => 'say hello', game => 'benchmark', node => '' );
 
 sub sendCommand {
     my %args    = ( 
         game    => '', 
         command => '',
         node    => '',
+        ip      => '',
                 @_,);
     
     my $game        = $args{'game'};
@@ -932,7 +1218,7 @@ sub connectSSH {
         my $this_connection;
         my $connection = $args{'user'} . "@" . $args{'ip'};
         
-        $this_connection = Net::OpenSSH->new($connection, master_opts => [-o => "PasswordAuthentication=no"]);
+        $this_connection = Net::OpenSSH->new($connection, timeout => 1, master_opts => [-o => "PasswordAuthentication=no"]);
          
          
         if ( $this_connection->error ) {
@@ -987,7 +1273,7 @@ sub haltGame {
 sub configLogger {
 
     $log_conf = q{
-        log4perl.category                   = DEBUG, Logfile, Screen, DBAppndr
+        log4perl.category                   = INFO, Logfile, Screen, DBAppndr
 
  
         log4perl.appender.Logfile           = Log::Log4perl::Appender::File
@@ -1034,7 +1320,13 @@ sub storeGame {
       
     my ($user, $suser, $cp_to, $cp_from);
     
-    return 1 unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+    my $error  = "Aborting task as $game is offline!! ";
+       $error .= "It's potentially catastrophic to overwrite ";
+       $error .= "the primary store with data we cannot verify. ";
+       $error .= "Please ensure the game is running to prove viabitiy ";
+       $error .= "before attempting a sync to the primary data store location"; 
+       
+       return $error unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
     
     my $settings    = readFromDB(
         table       => 'games',
@@ -1131,11 +1423,11 @@ sub bootGame {
 
     if ( checkIsOnline( list_by => 'game', node => '', game => $game ) ) {
         $log->info("Started $game");
-        return "$game is Online";
+        return 0;
     }
     else {
         $log->info("Failed to start $game");
-        return "Starting $game failed";
+        return 1;
     }
 }
 
@@ -1150,7 +1442,10 @@ sub deployGame {
     
     my ($user, $suser, $cp_to, $cp_from);
     
-    return 1 if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+    my $error  = "Aborting task as $game is currently online. ";
+       $error .= "It would be unsafe to deloy overtop of a running game. "; 
+    
+    return $error if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
     
     my  $settings = readFromDB( table => 'games',
                                column => 'name',
@@ -1221,7 +1516,22 @@ __DATA__
         background-attachment: fixed;
 
     }
+    .custom {
+    width: 78px !important;
+    margin-right: 3px;
+    }
   </style>
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="check-circle-fill" fill="currentColor" viewBox="0 0 16 16">
+    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+  </symbol>
+  <symbol id="info-fill" fill="currentColor" viewBox="0 0 16 16">
+    <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
+  </symbol>
+  <symbol id="exclamation-triangle-fill" fill="currentColor" viewBox="0 0 16 16">
+    <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+  </symbol>
+</svg>
 <nav class="navbar navbar-expand-lg sticky-top navbar-dark bg-dark">
   <div class="container-fluid">
     <a class="navbar-brand" href="/">
@@ -1242,7 +1552,7 @@ __DATA__
           <a class="nav-link" href="/yancy">settings</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link" href="/minion">minion</a>
+          <a class="nav-link" href="/minion">minions</a>
         </li>
         <li class="nav-item">
           <a class="nav-link" href="https://stats.splatage.com">stats</a>
@@ -1255,9 +1565,29 @@ __DATA__
         </li>      
       </ul>
     </div>
+    % my $flash_message = $c->flash('message');
+    % if ($flash_message) {
+      <div class="alert alert-primary d-flex align-items-center alert-dismissible fade show" role="alert">
+        <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
+        <div>
+          <%= $flash_message %>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      </div>  
+    % }
+    % my $flash_error = $c->flash('error');
+    % if ($flash_error) {
+      <div class="alert alert-danger d-flex align-items-center alert-dismissible fade show" role="alert">
+        <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
+        <div>
+          <%= $flash_error %>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      </div>  
+    % }
   </div>
 </nav>
-
+<ul>
 
   <div height: 100%;>
     <main class="container bg-secondary shadow-lg p-3 mb-5 mt-4 bg-body rounded" style="--bs-bg-opacity: .95;">
@@ -1278,7 +1608,7 @@ __DATA__
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
         <div class="alert alert-success" role="alert">
-          <h4 class="alert-heading">Control Games on Node</h4>
+          <h4 class="alert-heading">manage games</h4>
         </div>
       
         % my %nodes   = %$nodes;
@@ -1299,10 +1629,14 @@ __DATA__
                 </h3>
             </div>
 
-            <hr>
 
+        <div class="row height: 40px">
+        <hr>
+        <h5 class="text-success">online</h5>
+
+        </div>
             % for my $game (sort keys %{$nodes{$node}}) {        
-            <div class="row">
+            <div class="row height: 40px">
            
                 % my $online       = 'true'; # = $node{$game}{'online'};
                 % my $isLobby     = 'false'; # = $node{$game}{'isLobby'};
@@ -1325,7 +1659,7 @@ __DATA__
                       </a>
                         <img class="align-self-top mr-3" 
                           src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
-                          alt="Generic placeholder image" height="30">
+                          alt="Generic placeholder image" height="25">
                           </h4> <%= $game %> </h4>
                         </image>
                       </div>
@@ -1333,36 +1667,38 @@ __DATA__
             
                 % if (app->minion->lock($game, 0)) {
                 <div class="col d-flex justify-content-end mb-2 shadow">
-                    <a class="ml-1 btn btn-sm btn-outline-dark       
-                        justify-end" href="/update/<%= $game %>/<%= $node %>"    role="button">Update</a>
-                    <a class="ml-1 btn btn-sm btn-outline-secondary  
-                        justify-end" href="/deploy/<%= $game %>/<%= $node %>"    role="button">Deploy</a>
-                    <a class="ml-1 btn btn-sm btn-outline-secondary  
-                        justify-end" href="/store/<%= $game %>/<%= $node %>"     role="button">Store</a>
-                    <a class="ml-1 btn btn-sm btn-outline-info       
-                        justify-end" href="/link/<%= $game %>/<%= $node %>"      role="button">Link</a>
-                    <a class="ml-1 btn btn-sm btn-outline-info       
-                        justify-end" href="/drop/<%= $game %>/<%= $node %>"      role="button">Drop</a>
-                    <a class="ml-1 btn btn-sm btn-outline-success    
-                        justify-end" href="/boot/<%= $game %>/<%= $node %>"      role="button">Boot</a>
-                    <a class="ml-1 btn btn-sm btn-outline-danger     
-                        justify-end" href="/halt/<%= $game %>/<%= $node %>"      role="button">Halt</a>
+                    <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+                        justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
+                        href="/store/<%= $game %>/<%= $node %>"     role="button">store</a>
+                    <a class="ml-1 btn btn-sm btn-outline-info custom     
+                        justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network" 
+                        href="/link/<%= $game %>/<%= $node %>"      role="button">link</a>
+                    <a class="ml-1 btn btn-sm btn-outline-info custom
+                                justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+                                href="/drop/<%= $game %>/<%= $node %>"      role="button">drop</a>
+                    <a class="ml-1 btn btn-sm btn-danger     custom
+                        justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
+                        href="/halt/<%= $game %>/<%= $node %>"      role="button">halt</a>
                 </div>
                 % } else {                    
                     <div class="col d-flex justify-content-end mb-2 shadow">
-                        <a class="ml-1 btn btn-sm btn-outline-success     
+                        <a class="ml-1 btn btn-sm btn-outline-danger  
                         justify-end" href="/minion/locks"      role="button">locked while task is running</a>
                     </div>
                 % }        
             </div>   
             % }
-            <hr>
 
-   <h5>offline</h5>
+
+        <div class="row height: 40px">
+        <hr>
+        <h5 class="text-danger">offline</h5>
+
+        </div>
             % for my $game (sort keys %{$expected}) {     
                 % if ( $expected{$game}{'node'} eq $node && ! ${nodes}{$node}{$game}{'pid'} ) {
              
-                <div class="row">
+                <div class="row height: 40px">
                    <div class="col d-flex justify-content-start mb-2 shadow ">
                     <div class="media" >
                       <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
@@ -1377,36 +1713,38 @@ __DATA__
                           alt="Generic placeholder image" height="35">
                         </image>
                       </a>
-                        <img class="align-self-top mr-3" 
-                          src="http://www.splatage.com/wp-content/uploads/2022/08/c_icon-1.png"
-                          alt="Generic placeholder image" height="40">
-                          </h4> <%= $game %> </h4>
-                        </image>
-                      </div>
-                  
+                      <img class="align-self-top mr-3" 
+                        src="http://www.splatage.com/wp-content/uploads/2022/08/minecraft-chest-icon-19.png"
+                        alt="Generic placeholder image" height="30">
+                        </h4> <%= $game %> </h4>
+                      </image>
+                    </div>
+                  </div>
 
 
                     % if (app->minion->lock($game, 0)) {
                         <div class="col d-flex justify-content-end mb-2 shadow">
-                            <a class="ml-1 btn btn-sm btn-outline-dark       
-                                justify-end" href="/update/<%= $game %>/<%= $node %>"    role="button">Update</a>
-                            <a class="ml-1 btn btn-sm btn-outline-secondary  
-                                justify-end" href="/deploy/<%= $game %>/<%= $node %>"    role="button">Deploy</a>
-                            <a class="ml-1 btn btn-sm btn-outline-secondary  
-                                justify-end" href="/store/<%= $game %>/<%= $node %>"     role="button">Store</a>
-                            <a class="ml-1 btn btn-sm btn-outline-info       
-                                justify-end" href="/link/<%= $game %>/<%= $node %>"      role="button">Link</a>
-                            <a class="ml-1 btn btn-sm btn-outline-info       
-                                justify-end" href="/drop/<%= $game %>/<%= $node %>"      role="button">Drop</a>
-                            <a class="ml-1 btn btn-sm btn-outline-success    
-                                justify-end" href="/boot/<%= $game %>/<%= $node %>"      role="button">Boot</a>
-                            <a class="ml-1 btn btn-sm btn-outline-danger     
-                                justify-end" href="/halt/<%= $game %>/<%= $node %>"      role="button">Halt</a>
+                            <a class="ml-1 btn btn-sm btn-outline-dark    custom   
+                                justify-end" data-toggle="tooltip" data-placement="top" title="migrate to another node"
+                                href="/move/<%= $game %>/<%= $node %>"    role="button">move</a>
+                            <a class="ml-1 btn btn-sm btn-outline-dark     custom  
+                                justify-end" data-toggle="tooltip" data-placement="top" title="update server and plugins"
+                                href="/update/<%= $game %>/<%= $node %>"    role="button">update</a>
+                            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+                                justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
+                                href="/deploy/<%= $game %>/<%= $node %>"    role="button">deploy</a>
+                            <a class="ml-1 btn btn-sm btn-outline-info     custom  
+                                justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+                                href="/drop/<%= $game %>/<%= $node %>"      role="button">drop</a>
+                            <a class="ml-1 btn btn-sm btn-success    custom
+                                justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
+                                href="/boot/<%= $game %>/<%= $node %>"      role="button">boot</a>
                         </div>
                     % } else {
                     <div class="col d-flex justify-content-end mb-2 shadow">
-                        <a class="ml-1 btn btn-sm btn-outline-success     
-                        justify-end" href="/minion/locks"      role="button">locked while task is running</a>
+                        <a class="ml-1 btn btn-sm btn-outline-danger 
+                        justify-end" data-toggle="tooltip" data-placement="top" title="for safety on a single job can run on each game"
+                        href="/minion/locks"      role="button">locked while task is running</a>
                     </div>
                     % }
                     </div>
@@ -1495,7 +1833,7 @@ __DATA__
 <html>
 
   <div class="alert alert-success" role="alert">
-    <h4 class="alert-heading">Current Online Nodes and Game Servers</h4>
+    <h4 class="alert-heading">online nodes and games</h4>
   </div>
 
 <body class="m-0 border-0">
@@ -1508,7 +1846,7 @@ __DATA__
       % for my $node (sort keys %$nodes) {
       % if ( ! $nodes{$node}{'offline'} ) {
 
-        <div class="col shadow bg-medium mt-4 rounded">  
+        <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">  
      
           <div class="media mt-2">
 
@@ -1562,7 +1900,74 @@ __DATA__
         % }
         <hr>
         
+  <div class="alert alert-danger" role="alert">
+    <h4 class="alert-heading">offline nodes</h4>
+  </div>
+
+  <div class="container-fluid text-left">
+    <div class="row justify-content-start">
       
+      
+      % my %nodes    = %$nodes;
+      % my %expected = %$expected;
+      % for my $node (sort keys %$nodes) {
+      % if ( $nodes{$node}{'offline'} ) {
+
+        <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">  
+     
+          <div class="media mt-2">
+
+            <img class="align-self-top mr-1 mt-2 mb-2" 
+              src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
+              alt="Generic placeholder image" height="80">
+                <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
+                
+                  <%= $node %>
+
+                </a>
+             </img>  
+
+                <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
+                  % for my $game (sort keys %{$nodes{$node}}) {
+                    % if ( $game ne 'offline' ) {
+                                
+                      <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
+                           <span class="badge badge-primary text-dark">
+                       <%= $game %></span>
+                        <span style="float:right; mr-1" class="mr-1 fs-6">
+                        <small>
+                           <%= int($nodes->{$node}->{$game}->{'pcpu'} + 0.5) %>% |
+                           <%= int($nodes->{$node}->{$game}->{'rss'}/1024 + 0.5) %>M
+                        </small>
+                        </span>
+                      </a>
+                    % }
+                  % }
+                </div>
+                
+           
+           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">     
+                %for my $game (sort keys %{$expected}) {
+                    % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) { 
+                    
+                     <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
+                           <span class="badge badge-primary text-dark">
+                       <%= $game %></span>
+                        <span style="float:right; mr-1" class="mr-1">
+                        <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
+                        </span>
+                   
+                      </a>
+            % }
+        % }
+            </div>
+           </div>
+         </div>       
+         % }
+        % }
+        <hr>
+        
+            
 
 <!--
 <hr>
@@ -1656,7 +2061,12 @@ pre {
 </style>
 
 <%== $log_data %>
-<div id="header"> <p>minecraft@<%= $node %>:~$ tail -f <%= $game %>.log </p><div id="cursor"></div></div>
+
+<div id="header"><p>minecraft@<%= $node %>:~$ tail -f <%= $game %>.log &</p></div>
+<div id="header"><p>minecraft@<%= $node %>:~$ </p><div id="cursor">  </div>
+
+</div>
+
 </body>
 </html>
 
@@ -1668,7 +2078,7 @@ pre {
     $('html, body').animate({scrollTop: $(document).height()},'slow');
 
     %# Schedule the first update in five seconds
-    setTimeout("updatePage()",30000);
+    setTimeout("updatePage()",300000);
   });
 
   %# This function will update the page
@@ -1677,7 +2087,7 @@ pre {
     $('html, body').animate({scrollTop: $(document).height()});
 
     %# Schedule the next update in five seconds
-    setTimeout("updatePage()",30000);
+    setTimeout("updatePage()",300000);
   }
 
 </script>
@@ -1705,7 +2115,7 @@ pre {
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
         <div class="alert alert-success" role="alert">
-          <h4 class="alert-heading">Game</h4>
+          <h4 class="alert-heading">game</h4>
         </div>
       % my @files = @$files; 
 
@@ -1722,3 +2132,120 @@ pre {
 </body>
 </html>
 
+
+
+@@ register.html.ep
+% layout 'default';
+<br /> <br />
+<div class="container">
+    <div class="card col-sm-6 mx-auto">
+        <div class="card-header text-center">
+            User Registration Form
+        </div>
+        <br /> <br />
+        <form method="post" action='/register'>
+            <input class="form-control" 
+                   id="username" 
+                   name="username" 
+                   type="email" size="40"
+                   placeholder="Enter Username" 
+             />
+            <br /> <br />
+            <input class="form-control" 
+                   id="password" 
+                   name="password" 
+                   type="password" 
+                   size="40" 
+                   placeholder="Enter Password" 
+             />   
+            <br /> <br />
+            <input class="form-control" 
+                   id="confirm_password" 
+                   name="confirm_password" 
+                   type="password" 
+                   size="40" 
+                   placeholder="Confirm Password" 
+             />   
+            <br /> <br />
+            <input class="form-control" 
+                   id="first_name" 
+                   name="firstName" 
+                   type="password" 
+                   size="40" 
+                   placeholder="User's First Name" 
+             />   
+            <br /> <br />
+            <input class="form-control" 
+                   id="middle_name" 
+                   name="middleName" 
+                   type="password" 
+                   size="40" 
+                   placeholder="User's Middle Name" 
+             />   
+            <br /> <br />
+            <input class="form-control" 
+                   id="username" 
+                   name="lastName" 
+                   type="password" 
+                   size="40" 
+                   placeholder="User's Last Name" 
+             />   
+            <br /> <br />
+            <input class="btn btn-primary" type="submit" value="Register">
+            <br />  <br />
+        </form>
+      % if ($error) {
+            <div class="error" style="color: red">
+                <small> <%= $error %> </small>
+            </div>
+        %}
+
+        % if ($message) {
+            <div class="error" style="color: green">
+                <small> <%= $message %> </small>
+            </div>
+        %}
+    </div>
+
+</div>
+
+
+@@ login.html.ep
+% layout 'default';
+
+<br /> <br />
+
+<div class="container">
+    <div class="card col-sm-6 mx-auto">
+        <div class="card-header text-center">
+            User Sign In 
+        </div>
+        <br /> <br />
+        <form method="post" action='/login'>
+            <input class="form-control" 
+                   id="username" 
+                   name="username" 
+                   type="email" size="40"
+                   placeholder="Enter Username" 
+             />
+            <br /> 
+            <input class="form-control" 
+                   id="password" 
+                   name="password" 
+                   type="password" 
+                   size="40" 
+                   placeholder="Enter Password" 
+             />     
+            <br /> 
+            <input class="btn btn-primary" type="submit" value="Sign In">
+            <br />  <br />
+        </form>
+
+        % if ($error) {
+            <div class="error" style="color: red">
+                <small> <%= $error %> </small>
+            </div>
+        %}
+    </div>
+
+</div>
