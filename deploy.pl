@@ -2,8 +2,12 @@
 use v5.28;
 use Mojolicious::Lite -signatures; #, -async_await;
 use Mojo::mysql;
+use Mojolicious::Plugin::Authentication;
+use Mojo::UserAgent;
+use IO::Socket::SSL;
 # use Mojo::Base 'Mojolicious::Controller';
 # use Future::AsyncAwait;
+
 use Minion;
 use Net::OpenSSH;
 use DBD::mysql;
@@ -110,6 +114,9 @@ plugin 'Minion::Admin' => {route => app->routes->any('/minion')};
 
 ## Update #################################################
 
+
+
+
 get '/update/:game/:node' => sub ($c) {
     my $task = 'update' ;
     my $game = $c->stash('game');
@@ -158,11 +165,16 @@ app->minion->add_task(boot => sub ($job, $game) {
 
 
       my $deploy = deployGame(game => $game);
-        $job->note(deploy => $deploy);
-      my $boot   = bootGame(game => $game);
-        $job->note(boot => $boot);
+         $job->note(deploy => $deploy);
+        
+      my $update = update( game => $game );
+         $job->note(update => $update);
+         
+      my $boot   = bootGame(game => $game, server_bin => $update);
+         $job->note(boot => $boot);
+        
       my $regist = registerGame(game => $game);
-        $job->note(register => $regist);
+         $job->note(register => $regist);
 
     $job->app->log->info("$task $game completed");
     unless ($boot) {
@@ -183,23 +195,25 @@ get '/halt/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
       
        # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 2});
+    $c->minion->enqueue($task => [$game],{attempts => 1});
     $c->flash(message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(halt => sub ($job, $game) {
     my $task = 'halt' ;
     my $lock = $game;
-    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 1200);
+    return $job->fail("Previous job $task for $game is still active. Refusing to proceed")
+        unless app->minion->lock($lock, 60);
 
     $job->app->log->info("Job: $task $game begins");
 
     my $store  = storeGame(game => $game);
+                $job->note(storegame => $store);
     my $halt   = haltGame( game => $game);
-
+                $job->note(halt => $halt);
+        
     $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed", store => $store, halt => $halt});
+    $job->finish({message => "$task $game completed"});
     
     app->minion->unlock($lock);
 });
@@ -338,7 +352,7 @@ plugin Yancy => {
     schema => {
         games => {
             # Show these columns in the Yancy editor
-            'x-list-columns'    => [qw( name enabled node store mem_max server_bin )],
+            'x-list-columns'    => [qw( name node release port mem_max store enabled isBungee )],
         },
         nodes => {
             'x-list-clomuns'    => [qw( name ip enabled isGateway )],
@@ -673,6 +687,82 @@ sub generate_password {
 ###########################################################
 ##    Functions
 ###########################################################
+sub update {
+        my %args = ( 
+        game        => '',
+        node        => '',
+        ip          => '',
+        project     => '',
+        release     => '', 
+        @_,         # argument pair list goes here
+    );
+    
+    my ($project, $release, $version);
+
+    my $game = $args{'game'}    or return 1;
+    
+    my $settings    =  readFromDB(
+        table       => 'games',
+        column      => 'name', 
+        field       => 'name', 
+        value       => $game,
+        hash_ref    => 'true'
+        );
+    my $ip          =  readFromDB(
+        table       => 'nodes',
+        column      => 'ip', 
+        field       => 'name', 
+        value       => $settings->{$game}{'node'},
+        hash_ref    => 'false'
+        );   
+        
+    if ( $settings->{$game}{isBungee} eq '1' ) {
+        $project    = 'waterfall';
+    }
+    else {
+        $project    = 'paper';
+    }
+    
+    $release        = $settings->{$game}{release};
+
+    # Get latest release version 
+    my $project_url = "https://api.papermc.io/v2/projects/$project/versions/$release/";
+    my $ua          = Mojo::UserAgent->new();
+    my $builds      = $ua->get($project_url)->result->json;
+
+    my $latest      = $builds->{'builds'}[-1];    
+    my $file_name   = "$project-$release-$latest.jar";
+    
+       $project_url = $project_url . '/builds/' . $latest;
+    my $meta        = $ua->get("$project_url")->result->json;
+    my $sha256      = $meta->{'downloads'}->{'application'}{'sha256'};
+    
+    
+    my $path =  $settings->{$game}{'node_path'} . '/' . $game . '/game_files/' . $file_name;
+
+
+    # Install Latest version
+   my $user = $settings->{$game}{'node_usr'};
+   connectSSH( user => $user , ip => $ip ) ;
+   
+   $project_url = $project_url . '/downloads/' . $file_name;
+    my $cmd     = 'wget -c ' . $project_url . ' -O ' . $path;
+
+    
+    print $cmd;
+    
+    $SSH_connections{$user.$ip}->system("$cmd");
+    
+       $cmd      = "sha256sum $path";
+    my @sha_file = split (/ /, $SSH_connections{$user.$ip}->capture("$cmd"));
+    
+    if ( $sha_file[0] eq $sha256 ) {
+        return "$file_name";
+    }
+    else {
+        return 0;
+    }   
+}
 
 sub readLog {
         my %args = ( 
@@ -858,7 +948,7 @@ sub checkIsOnline {
         #my %this_node = %$this_node;        
         $log->debug( "this node: $this_node");
         my $p = Net::Ping->new;
-        if ($p->ping($enabledNodes{$this_node}{'ip'} , 0.1)) {
+        if ($p->ping($enabledNodes{$this_node}{'ip'} , 0.01)) {
             $log->debug( "[OK] $this_node is online" ); 
             push @live_nodes, $this_node ;
         }
@@ -1218,7 +1308,7 @@ sub connectSSH {
         my $this_connection;
         my $connection = $args{'user'} . "@" . $args{'ip'};
         
-        $this_connection = Net::OpenSSH->new($connection, timeout => 1, master_opts => [-o => "PasswordAuthentication=no"]);
+        $this_connection = Net::OpenSSH->new($connection, master_opts => ['-o PasswordAuthentication=no','-o StrictHostKeyChecking=no']);
          
          
         if ( $this_connection->error ) {
@@ -1258,7 +1348,7 @@ sub haltGame {
  
     sendCommand( command => "stop^Mend", game => $game, node => $node );
 
-    sleep(10);
+    sleep(30);
 
     unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) ) {
         $log->info("Halt $game succeeded");
@@ -1364,16 +1454,17 @@ sub storeGame {
 
     my $output = connectSSH( user => $suser, ip => $sip ) . "\n";
 
-    $log->debug("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to");
-    $output .= $SSH_connections{$suser.$sip}->capture("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to");
+    $log->debug("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to");
+    $output .= $SSH_connections{$suser.$sip}->capture("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to");
 
     return $output;
 }
 
 # bootGame('benchmark');
 sub bootGame {
-    my %args = ( 
-        game   => '', 
+    my %args       = ( 
+        game       => '',
+        server_bin => '',
         @_,         # argument pair list goes here
     );
     
@@ -1400,14 +1491,14 @@ sub bootGame {
         hash_ref    => 'false' );
                                  
     my $invocation;
-       $invocation  = "cd " . $settings{$game}{'node_path'};
+       $invocation  = "cd " . $settings->{$game}{'node_path'};
        $invocation .= "/" . $game . "/game_files";
        $invocation .= " && screen -h 1024 -L -dmS " . $game;
-       $invocation .= " " . $settings{$game}{'java_bin'};
-       $invocation .= " -Xms" . $settings{$game}{'mem_min'} . "M";
-       $invocation .= " -Xmx" . $settings{$game}{'mem_max'} . "M";
-       $invocation .= " " . $settings{$game}{'java_flags'};
-       $invocation .= " -jar " . $settings{$game}{'server_bin'};
+       $invocation .= " " . $settings->{$game}{'java_bin'};
+       $invocation .= " -Xms" . $settings->{$game}{'mem_min'} . "M";
+       $invocation .= " -Xmx" . $settings->{$game}{'mem_max'} . "M";
+       $invocation .= " " . $settings->{$game}{'java_flags'};
+       $invocation .= " -jar " . $args{'server_bin'};
        $invocation .= " --forceUpgrade";
        $invocation .= " --port " . $settings{$game}{'port'};
        $invocation .= " nogui server";
@@ -1478,7 +1569,7 @@ sub deployGame {
     $cp_from    = $settings{$game}{"store_path"} . "/" . $game;
 
 
-    my $rsync_cmd = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no' $cp_from $cp_to";
+    my $rsync_cmd = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
     $log->debug(" $rsync_cmd ");
 
      unless ( connectSSH( user => $suser, ip => $sip ) ) {
