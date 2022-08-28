@@ -30,6 +30,11 @@ use warnings;
 
 # Make admin ui available under "/minion"
 plugin 'Minion::Admin';
+# Secure access to the admin ui with Basic authentication
+# Secure access to the admin ui with Basic authentication
+
+
+
 plugin 'AutoReload';
 
 
@@ -41,7 +46,6 @@ my $db_host;            # From config file
 my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
-my $dbh;                # DataBase Handle
 my $sth;                # DB Syntax Handle
 my $ref;                # HASH reference for DB results
 my %settings;           # HASH storing the DB settings
@@ -79,15 +83,13 @@ my $debug = 'false';    # Print out settings returned from DB
 
 read_config_file('config/deploy.cfg');
 
-$dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
+my $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
        "$db_user", "$db_pass", { 'RaiseError' => 1 } );
        
 my $db_string  = "mysql://" . $db_user . ":" .$db_pass . "@" . $db_host. "/" .$db_name;
-#   $db_string .= $conf{'db_pass'} . "@" . $conf{'db_host'} . "/" . $conf{'db_name'};
 my $db = Mojo::mysql->strict_mode($db_string);
 
 plugin Minion => {mysql => "$db_string"};
-
 
 
 ## Logging
@@ -110,7 +112,12 @@ my $log = Log::Log4perl::get_logger();
 
 plugin 'Minion::Admin' => {route => app->routes->any('/minion')};
 
-
+get '/minion' => sub ($c) {
+  return 1 if $c->req->url->to_abs->userinfo eq 'Bender:rocks';
+  $c->res->headers->www_authenticate('Basic');
+  $c->render(text => 'Authentication required!', status => 401);
+  return undef;
+};
 
 ## Update #################################################
 
@@ -118,6 +125,7 @@ plugin 'Minion::Admin' => {route => app->routes->any('/minion')};
 
 
 get '/update/:game/:node' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $task = 'update' ;
     my $game = $c->stash('game');
     my $node = $c->stash('node');
@@ -147,6 +155,7 @@ app->minion->add_task(update => sub ($job, $game) {
 ## Boot   #################################################
 
 get '/boot/:game/:node' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $task = 'boot' ;
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -190,6 +199,7 @@ app->minion->add_task(boot => sub ($job, $game) {
 ## Halt ###################################################
 
 get '/halt/:game/:node' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $task = 'halt' ;
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -222,6 +232,7 @@ app->minion->add_task(halt => sub ($job, $game) {
 ## Deploy #################################################
 
 get '/deploy/:game/:node' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $task = 'deploy' ;
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -250,6 +261,7 @@ app->minion->add_task(deploy => sub ($job, $game) {
 ## Store #################################################
 
 get '/store/:game/:node' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $task = 'store';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -260,6 +272,7 @@ get '/store/:game/:node' => sub ($c) {
     $c->redirect_to("/node/$node");
 };
 app->minion->add_task(store => sub ($job, $game) {
+
     my $task = 'store' ;
     my $lock = $game;
     return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
@@ -278,6 +291,7 @@ app->minion->add_task(store => sub ($job, $game) {
 ## Link ###################################################
 
 get '/link/:game/:node' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $task = 'link';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -295,7 +309,7 @@ app->minion->add_task(link => sub ($job, $game) {
         unless app->minion->lock($lock, 10);
 
     $job->app->log->info("Job: $task $game begins");
-    sleep 1;
+
     
       my $regist = registerGame(game => $game);
         $job->note(register => $regist);
@@ -309,6 +323,7 @@ app->minion->add_task(link => sub ($job, $game) {
 ## Drop #################################################
 
 get '/drop/:game/:node' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $task = 'drop';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -325,9 +340,9 @@ app->minion->add_task(drop => sub ($job, $game) {
         unless app->minion->lock($lock, 10);
 
     $job->app->log->info("Job: $task $game begins");
-    sleep 1;
-        
-    #Do Stuff here
+            
+    deregisterGame( game => $game );
+ 
 
     $job->app->log->info("$task $game completed");
     $job->finish({message => "$task $game completed"});
@@ -363,14 +378,47 @@ plugin Yancy => {
         minion_jobs_depends     => { 'x-ignore' => 'true'},
         minion_workers_inbox    => { 'x-ignore' => 'true'},
         mojo_pubsub_subscribe   => { 'x-ignore' => 'true'},
-        isOnline => { 'x-ignore' => 'true'}, 
+        isOnline => { 'x-ignore' => 'true'},
+        users => {
+            'x-id-field' => 'email',
+            required => [ 'email', 'password' ],
+            properties => {
+                email => {
+                    type => 'string',
+                    format => 'email',
+                },
+                password => {
+                    type => 'string',
+                    format => 'password',
+                
+                },
+                is_admin => {
+                    type => 'boolean',
+                    default => 0,
+                },
+            },
+        },
+        
+    },
+    editor => {
+        require_user => { is_admin => 1 },
     },
 };
 
+app->yancy->plugin( 'Auth::Password' => {
+    schema => 'users',
+    allow_register => 1,
+    username_field => 'email',
+    password_field => 'password',
+    password_digest => {
+        type => 'SHA-1',
+    },
+} );
 
 
-
-
+get '/yancy#/*'       => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+};
 
 
 
@@ -385,6 +433,10 @@ plugin Yancy => {
 
 
 get '/' => sub ($c) {
+#my $user = $c->yancy->auth->current_user
+#       || return $c->yancy->auth->login_form;
+
+## return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $results         =  checkIsOnline( 
         list_by         => 'node', 
         node            => '',
@@ -393,6 +445,8 @@ get '/' => sub ($c) {
     my $expected        =  readFromDB( 
         table           => 'games',
         column          => 'name',
+        field           => 'enabled',
+        value           => '1',
         hash_ref        => 'true' );
                            
     $c->stash( nodes    => $results, 
@@ -403,6 +457,7 @@ get '/' => sub ($c) {
 
 
 get '/log/:node/:game'  => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $game            = $c->stash('game');
     my $node            = $c->stash('node');
 
@@ -417,6 +472,7 @@ get '/log/:node/:game'  => sub ($c) {
 
 
 get '/node/:node'       => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $node            = $c->stash('node');
     my $results         = checkIsOnline( 
         list_by         => 'node', 
@@ -450,6 +506,7 @@ get '/node/:node'       => sub ($c) {
 
 
 get '/files/:game'      => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $game            = $c->stash('game');
     my @results         = getFiles(game => $game);
     
@@ -458,6 +515,7 @@ get '/files/:game'      => sub ($c) {
 };
 
 get '/debug/:node/:game' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $node            = $c->stash('node');
     my $game            = $c->stash('node');
     my ($results, $expected);
@@ -482,6 +540,7 @@ get '/debug/:node/:game' => sub ($c) {
 };
 
 get '/move/:node/:game' => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $node            = $c->stash('node');
     my $game            = $c->stash('node');
     my ($results, $expected);
@@ -510,178 +569,67 @@ get '/move/:node/:game' => sub ($c) {
 ###########################################################
 ##  Authentication
 ###########################################################
-get '/login' => sub ($c) {
+{
+   my %db = (
+      foo => {pass => 'FOO', name => 'Foo De Pois'},
+      bar => {pass => 'BAZ', name => 'Bar Auangle'},
+   );
+   sub load_account ($u) { return $db{$u} // undef }
+   sub validate ($u, $p) {
+      warn "user<$u> pass<$p>\n";
+      my $account = load_account($u) or return;
+      return $account->{pass} eq $p;
+   }
+}
 
-    $c->render(
-        template => 'login',
-        error    => $c->flash('error')
-    );
-};
+app->plugin(
+   Authentication => {
+      load_user     => sub ($app, $uid) { load_account($uid) },
+      validate_user => sub ($c, $u, $p, $e) { validate($u, $p) ? $u : () },
+   }
+);
+
+app->hook(
+   before_render => sub ($c, $args) {
+      my $user = $c->is_user_authenticated ? $c->current_user : undef;
+      $c->stash(user => $user);
+      return $c;
+   }
+);
+
+get '/login' => sub ($c) { $c->render(template => 'login') };
+
 post '/login' => sub ($c) {
-    refreshDB();
-    my $username = $c->param('username');                               # From the form
-    my $password = $c->param('password');                               # From the form
-
-    my $db_object = $c->app->{_dbh};
-
-    $c->app->plugin('authentication' => {
-        autoload_user   => 1,
-        wickedapp       => 'YouAreLogIn',
-        load_user       => sub {
-            my ($c, $user_key) = @_;
-            my @user = $db_object->resultset('User')->search({
-                id => $user_key
-            });
-
-            return \@user;
-        },
-        validate_user   => sub { 
-            my ($c, $username, $password) = @_; 
-
-            my $user_key = validate_user_login($db_object, $username, $password);
-
-            if ( $user_key ) {
-                $c->session(user => $user_key);
-                return $user_key;
-            }
-            else {
-                return undef;
-            }
-        },
-    });
-
-    my $auth_key = $c->authenticate($username, $password );
-
-    if ( $auth_key )  {
-        $c->flash( message => 'Login Success.');
-        return $c->redirect_to('/');
-    }
-    else {
-        $c->flash( error => 'Invalid username or password.');
-        $c->redirect_to('login');
-    }
+   my $username = $c->param('username');
+   my $password = $c->param('password');
+   my $auth_ok = $c->authenticate($username, $password);
+   $c->redirect_to($auth_ok ? 'private' : 'login');
+   return;
 };
 
-# Validate user from database
-sub validate_user_login {
-    refreshDB();
-    my ($username, $password) = @_;
-    
-        my $user = readFromDB(
-        table       => 'user',
-        column      => 'id', 
-        field       => 'email', 
-        value       => $username,
-        hash_ref    => 'true'
-        );
-        
-
-
-    if (! $user->{$user}{'password'} ) {
-        return 1;
-    }
-    else {        
-        return ( validate_password( 
-            $user->{$user}{'password'}, $password ) 
-        ) ? $user->{$user}{'id'} : 0;
-    }
+get '/private' => sub ($c) {
+   # return $c->redirect_to('/login') unless $c->is_user_authenticated;
+   return $c->render(template => 'private');
 };
 
-# To validate the Password
-sub validate_password {
-    my ($user_pass, $password) = @_;
-
-    my $pbkdf2 = Crypt::PBKDF2->new(
-        hash_class => 'HMACSHA1', 
-        iterations => 1000,       
-        output_len => 20,        
-        salt_len => 4,           
-    );
-
-    if ( $pbkdf2->validate($user_pass, $password) ) {
-        return 1
-    }
+post '/logout' => sub ($c) {
+   $c->yancy->auth->logout;
+   $c->logout if $c->is_user_authenticated;
+   return $c->redirect_to('/');
 };
 
-
-#get '/register' => sub(
-#    controller => 'RegistrationController', action => 'register'
-#);
-
-get '/register' => sub ($c) {
-    $c->render(
-        template => 'register',
-        error    => $c->flash('error'),
-        message  => $c->flash('message'),
-    );
+get '/logout' => sub ($c) {
+   $c->yancy->auth->logout;
+   $c->redirect_to('/');
 };
 
-post '/register' => sub ($c) {
-    my $email = $c->param('username');
-    my $password = $c->param('password');
-    my $confirm_password = $c->param('confirm_password');
-    my $first_name = $c->param('firstName');
-    my $middle_name = $c->param('middleName');
-    my $last_name = $c->param('lastName');
-
-    if (! $email || ! $password || ! $confirm_password || ! $first_name || ! $last_name) {
-        $c->flash( error => 'Username, Password, First Name and Last Name are the mandatory fields.');
-        $c->redirect_to('register');
-    }
-
-    if ($password ne $confirm_password) {
-        $c->flash( error => 'Password and Confirm Password must be same.');
-        $c->redirect_to('register');
-    }
-
-    my $dbh = $c->app->{_dbh};
-
-    my $user = readFromDB(
-        table       => 'user',
-        column      => 'email', 
-        field       => 'email', 
-        value       => $email,
-        hash_ref    => 'false'
-                  );
-
-    if (! $user ) {
-        eval {
-            $dbh->resultset('user')->create({ 
-                email       => $email,
-                password    => generate_password($password),
-                first_name  => $first_name,
-                middle_name => $middle_name,
-                last_name   => $last_name,
-                status      => 1
-            });
-        };
-        if ($@) {
-            $c->flash( error => 'Error in db query. Please check mysql logs.');
-            $c->redirect_to('register');
-        }
-        else {
-            $c->flash( message => 'User added to the database successfully.');
-            $c->redirect_to('register');
-        }
-    }
-    else {
-        $c->flash( error => 'Username already exists.');
-        $c->redirect_to('register');
-    }
+under '/authenticated' => sub ($c) {
+   return 1 if $c->is_user_authenticated;
+   $c->redirect_to('/login');
+   return 0;
 };
 
-sub generate_password {
-    my $password = shift;
-
-    my $pbkdf2 = Crypt::PBKDF2->new(
-        hash_class => 'HMACSHA1', 
-        iterations => 1000,       
-        output_len => 20,         
-        salt_len   => 4,         
-    );
-
-    return $pbkdf2->generate($password);
-};
+get '*' => sub ($c) { return $c->render(status => 404) };
 
 
 ###########################################################
@@ -1098,31 +1046,40 @@ sub registerGame {
 
 sub deregisterGame {
     my %args = ( 
-        game   => '', 
+        game => '', 
         @_,         # argument pair list goes here
     );
-    
+
     my $game = $args{'game'};
-    
-    my $gateway     = readFromDB(
+    my ($islobby, $isrestricted, $cmd);
+
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game, 
+        hash_ref    => 'true' );
+        
+    my $gateway      = readFromDB(
         table       => 'games',
         column      => 'name',
         field       => 'isBungee',
-        value       => '1',
+        value       => '1', 
         hash_ref    => 'false' );
+        
     my $node        = readFromDB(
         table       => 'games',
         column      => 'node',
         field       => 'isBungee',
-        value       => '1',
+        value       => '1', 
         hash_ref    => 'false' );
+                    
 
-    my $cmd = "servermanager delete " . $game;
-    #my $name = $gatewayName;
-       $log->debug("Deregistering $game from the network");
-       
-    sendCommand( game => $gateway, command => $cmd, node => $node );
+    $log->debug("Registering $game on the network with $gateway");
 
+    $cmd = "servermanager delete " . $game . "^M";
+
+    sendCommand( command => $cmd, game => $gateway, node => $node );
 }
 
 # getFiles(game => 'benchmark'); 
@@ -1495,8 +1452,8 @@ sub bootGame {
        $invocation .= "/" . $game . "/game_files";
        $invocation .= " && screen -h 1024 -L -dmS " . $game;
        $invocation .= " " . $settings->{$game}{'java_bin'};
-       $invocation .= " -Xms" . $settings->{$game}{'mem_min'} . "M";
-       $invocation .= " -Xmx" . $settings->{$game}{'mem_max'} . "M";
+       $invocation .= " -Xms" . $settings->{$game}{'mem_min'};
+       $invocation .= " -Xmx" . $settings->{$game}{'mem_max'};
        $invocation .= " " . $settings->{$game}{'java_flags'};
        $invocation .= " -jar " . $args{'server_bin'};
        $invocation .= " --forceUpgrade";
@@ -1623,19 +1580,21 @@ __DATA__
     <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
   </symbol>
 </svg>
+ 
 <nav class="navbar navbar-expand-lg sticky-top navbar-dark bg-dark">
   <div class="container-fluid">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01" 
+        aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+       <div class="collapse navbar-collapse" id="navbarTogglerDemo01">
     <a class="navbar-brand" href="/">
       <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
     </a>
     
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" 
-     data-bs-target="#navbarNav" aria-controls="navbarNav" 
-     aria-expanded="false" aria-label="Toggle navigation">
-      <span class="navbar-toggler-icon"></span>
-    </button>
-    <div class="collapse navbar-collapse" id="navbarNav">
-      <ul class="navbar-nav">
+    
+   <div class="container" id="navbarNav">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
         <li class="nav-item">
           <a class="nav-link active" aria-current="page" href="/">home</a>
         </li>
@@ -1653,11 +1612,22 @@ __DATA__
         </li>
         <li class="nav-item">
           <a class="nav-link" href="https://discord.com/channels/697634318067040327/697634318608236556">discord</a>
-        </li>      
-      </ul>
-    </div>
+        </li>
+  
+      <li class="nav-item">
+            % if (defined $user) {
+
+            <form action="/logout" method="post" style="display: inline" class="form-inline form-control mr-sm-2"  >
+                   <button type="submit" style="background: none!important; border: none; padding: 0!important;
+                   text-decoration: underline; cursor: pointer; color: #069;" class="btn btn-outline-success my-2 my-sm-0">Logout <%= $user->{name} %></button>
+            </form> 
+            
+            % }
+        </li>
+
     % my $flash_message = $c->flash('message');
     % if ($flash_message) {
+    <li class="nav-item">
       <div class="alert alert-primary d-flex align-items-center alert-dismissible fade show" role="alert">
         <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
         <div>
@@ -1675,10 +1645,14 @@ __DATA__
           <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       </div>  
+              </li>
+      
     % }
+    </ul>
+    </div>
   </div>
 </nav>
-<ul>
+
 
   <div height: 100%;>
     <main class="container bg-secondary shadow-lg p-3 mb-5 mt-4 bg-body rounded" style="--bs-bg-opacity: .95;">
@@ -1815,12 +1789,14 @@ __DATA__
 
                     % if (app->minion->lock($game, 0)) {
                         <div class="col d-flex justify-content-end mb-2 shadow">
+                        <!--
                             <a class="ml-1 btn btn-sm btn-outline-dark    custom   
                                 justify-end" data-toggle="tooltip" data-placement="top" title="migrate to another node"
                                 href="/move/<%= $game %>/<%= $node %>"    role="button">move</a>
                             <a class="ml-1 btn btn-sm btn-outline-dark     custom  
                                 justify-end" data-toggle="tooltip" data-placement="top" title="update server and plugins"
                                 href="/update/<%= $game %>/<%= $node %>"    role="button">update</a>
+                           -->     
                             <a class="ml-1 btn btn-sm btn-outline-secondary  custom
                                 justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
                                 href="/deploy/<%= $game %>/<%= $node %>"    role="button">deploy</a>
@@ -1836,30 +1812,20 @@ __DATA__
                         <a class="ml-1 btn btn-sm btn-outline-danger 
                         justify-end" data-toggle="tooltip" data-placement="top" title="for safety on a single job can run on each game"
                         href="/minion/locks"      role="button">locked while task is running</a>
-                    </div>
+                     </div>
                     % }
-                    </div>
+                 
                 </div>  
                 % }
             %}
         % }
     % }
   
-
-
-<!--
-<hr>
-<h2> Expected </h2>
-<%= dumper{%$expected} %>
-<hr>
-<hr>
-<h2> Nodes </h2>
-<%= dumper{%$nodes} %>
-<hr>
--->
-    </div>  
+  </div>  
 </body>
 </html>
+
+
 <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 
 <script type="text/javascript">
@@ -1991,10 +1957,9 @@ __DATA__
         % }
         <hr>
         
-  <div class="alert alert-danger" role="alert">
+   <div class="alert alert-danger" role="alert">
     <h4 class="alert-heading">offline nodes</h4>
   </div>
-
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
       
@@ -2003,21 +1968,17 @@ __DATA__
       % my %expected = %$expected;
       % for my $node (sort keys %$nodes) {
       % if ( $nodes{$node}{'offline'} ) {
-
         <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">  
      
           <div class="media mt-2">
-
             <img class="align-self-top mr-1 mt-2 mb-2" 
               src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
               alt="Generic placeholder image" height="80">
                 <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
                 
                   <%= $node %>
-
                 </a>
              </img>  
-
                 <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
                   % for my $game (sort keys %{$nodes{$node}}) {
                     % if ( $game ne 'offline' ) {
@@ -2039,7 +2000,7 @@ __DATA__
            
            <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">     
                 %for my $game (sort keys %{$expected}) {
-                    % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) { 
+                   % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) { 
                     
                      <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
                            <span class="badge badge-primary text-dark">
@@ -2048,9 +2009,9 @@ __DATA__
                         <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
                         </span>
                    
-                      </a>
-            % }
-        % }
+                     </a>
+                   % }
+                % }
             </div>
            </div>
          </div>       
@@ -2058,13 +2019,6 @@ __DATA__
         % }
         <hr>
         
-            
-
-<!--
-<hr>
-<%= dumper{%$expected} %>
-<hr>
--->
   </div>
 </body>
 </html>
@@ -2198,6 +2152,7 @@ pre {
 
 
 @@ files.html.ep
+% layout 'auth';
 % layout 'default';
 <!DOCTYPE html>
 
@@ -2223,120 +2178,3 @@ pre {
 </body>
 </html>
 
-
-
-@@ register.html.ep
-% layout 'default';
-<br /> <br />
-<div class="container">
-    <div class="card col-sm-6 mx-auto">
-        <div class="card-header text-center">
-            User Registration Form
-        </div>
-        <br /> <br />
-        <form method="post" action='/register'>
-            <input class="form-control" 
-                   id="username" 
-                   name="username" 
-                   type="email" size="40"
-                   placeholder="Enter Username" 
-             />
-            <br /> <br />
-            <input class="form-control" 
-                   id="password" 
-                   name="password" 
-                   type="password" 
-                   size="40" 
-                   placeholder="Enter Password" 
-             />   
-            <br /> <br />
-            <input class="form-control" 
-                   id="confirm_password" 
-                   name="confirm_password" 
-                   type="password" 
-                   size="40" 
-                   placeholder="Confirm Password" 
-             />   
-            <br /> <br />
-            <input class="form-control" 
-                   id="first_name" 
-                   name="firstName" 
-                   type="password" 
-                   size="40" 
-                   placeholder="User's First Name" 
-             />   
-            <br /> <br />
-            <input class="form-control" 
-                   id="middle_name" 
-                   name="middleName" 
-                   type="password" 
-                   size="40" 
-                   placeholder="User's Middle Name" 
-             />   
-            <br /> <br />
-            <input class="form-control" 
-                   id="username" 
-                   name="lastName" 
-                   type="password" 
-                   size="40" 
-                   placeholder="User's Last Name" 
-             />   
-            <br /> <br />
-            <input class="btn btn-primary" type="submit" value="Register">
-            <br />  <br />
-        </form>
-      % if ($error) {
-            <div class="error" style="color: red">
-                <small> <%= $error %> </small>
-            </div>
-        %}
-
-        % if ($message) {
-            <div class="error" style="color: green">
-                <small> <%= $message %> </small>
-            </div>
-        %}
-    </div>
-
-</div>
-
-
-@@ login.html.ep
-% layout 'default';
-
-<br /> <br />
-
-<div class="container">
-    <div class="card col-sm-6 mx-auto">
-        <div class="card-header text-center">
-            User Sign In 
-        </div>
-        <br /> <br />
-        <form method="post" action='/login'>
-            <input class="form-control" 
-                   id="username" 
-                   name="username" 
-                   type="email" size="40"
-                   placeholder="Enter Username" 
-             />
-            <br /> 
-            <input class="form-control" 
-                   id="password" 
-                   name="password" 
-                   type="password" 
-                   size="40" 
-                   placeholder="Enter Password" 
-             />     
-            <br /> 
-            <input class="btn btn-primary" type="submit" value="Sign In">
-            <br />  <br />
-        </form>
-
-        % if ($error) {
-            <div class="error" style="color: red">
-                <small> <%= $error %> </small>
-            </div>
-        %}
-    </div>
-
-</div>
