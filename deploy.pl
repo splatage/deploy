@@ -635,6 +635,8 @@ get '*' => sub ($c) { return $c->render(status => 404) };
 ###########################################################
 ##    Functions
 ###########################################################
+
+# update(game => 'castaway');
 sub update {
         my %args = ( 
         game        => '',
@@ -647,7 +649,7 @@ sub update {
     
     my ($project, $release, $version);
 
-    my $game = $args{'game'}    or return 1;
+    my $game = $args{'game'}  or return 1;
     
     my $settings    =  readFromDB(
         table       => 'games',
@@ -697,7 +699,7 @@ sub update {
     my $cmd     = 'wget -c ' . $project_url . ' -O ' . $path;
 
     
-    print $cmd;
+    print "connect: $user.$ip   $cmd\n";
     
     $SSH_connections{$user.$ip}->system("$cmd");
     
@@ -705,12 +707,13 @@ sub update {
     my @sha_file = split (/ /, $SSH_connections{$user.$ip}->capture("$cmd"));
     
     if ( $sha_file[0] eq $sha256 ) {
-        return "$file_name";
+        return "$file_name SHA: $sha256";
     }
     else {
         return 0;
     }   
 }
+
 
 sub readLog {
         my %args = ( 
@@ -1009,7 +1012,7 @@ sub registerGame {
         value       => $game, 
         hash_ref    => 'true' );
         
-    my $gateway      = readFromDB(
+    my $gateway     = readFromDB(
         table       => 'games',
         column      => 'name',
         field       => 'isBungee',
@@ -1022,6 +1025,13 @@ sub registerGame {
         field       => 'isBungee',
         value       => '1', 
         hash_ref    => 'false' );
+        
+    my $ip          = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $settings->{$game}{'node'}, 
+        hash_ref    => 'false' );
                     
 
     $log->debug("Registering $game on the network with $gateway");
@@ -1032,7 +1042,7 @@ sub registerGame {
     sleep(0.5);
 
     $cmd .= "servermanager add " . $game . " ";
-    $cmd .= $settings->{$game}{'node'} . " ";
+    $cmd .= $ip . " ";
     $cmd .= $settings->{$game}{'port'} . " ";
     $cmd .= $settings->{$game}{'isLobby'} . " true ";
     $cmd .= $settings->{$game}{'isRestricted'} . " " . $game;
@@ -1040,7 +1050,7 @@ sub registerGame {
     sendCommand( command => $cmd, game => $gateway, node => $node );
     sleep(0.5);
     
-    return "$game linked to $gateway network";
+    return "$game linked to $gateway network - $cmd";
 }
 
 
@@ -1275,7 +1285,7 @@ sub connectSSH {
             
             return 1;
         }
-        print "[OK] Connected to $args{'ip'}:" ;
+        print "[OK] Connected to: $args{'user'}.$args{'ip'}" ;
         $SSH_connections{$args{'user'}.$args{'ip'}} = $this_connection;
         
         return 0;
@@ -1411,8 +1421,8 @@ sub storeGame {
 
     my $output = connectSSH( user => $suser, ip => $sip ) . "\n";
 
-    $log->debug("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to");
-    $output .= $SSH_connections{$suser.$sip}->capture("rsync -auv --delete --exclude='*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to");
+    $log->debug("rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to");
+    $output .= $SSH_connections{$suser.$sip}->capture("rsync -auv --delete --exclude='pugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to");
 
     return $output;
 }
