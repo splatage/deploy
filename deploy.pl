@@ -471,6 +471,18 @@ get '/log/:node/:game'  => sub ($c) {
 };
 
 
+get '/info/:node/'  => sub ($c) {
+# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
+    my $node            = $c->stash('node');
+
+    my $results         = infoNode( node => $node );
+        
+    $c->stash( results => $results );
+    $c->render( template   => 'node_details', results => $results); 
+};
+
+
 get '/node/:node'       => sub ($c) {
 # return $c->redirect_to('/login') unless $c->is_user_authenticated;
     my $node            = $c->stash('node');
@@ -1033,7 +1045,11 @@ sub registerGame {
         value       => $settings->{$game}{'node'}, 
         hash_ref    => 'false' );
                     
-
+    # Exit if this game is a bungee server
+    if ( $settings->{$game}{'isBungee'} eq '1' ) {
+        return "This is a bungee instance, exiting";
+    }
+    
     $log->debug("Registering $game on the network with $gateway");
 
     $cmd = "servermanager delete " . $game . "^M";
@@ -1041,11 +1057,25 @@ sub registerGame {
     sendCommand( command => $cmd, game => $gateway, node => $node );
     sleep(0.5);
 
+    if ( $settings->{$game}{'isLobby'} eq '1' ) {
+        $islobby      = 'true';
+    }
+    else {
+         $islobby      = 'false';
+    }   
+    
+    if ( $settings->{$game}{'isRestricted'}   eq '1' ) {
+        $isrestricted = 'true';
+    }
+    else {
+        $isrestricted = 'false';
+    }
+
     $cmd .= "servermanager add " . $game . " ";
     $cmd .= $ip . " ";
     $cmd .= $settings->{$game}{'port'} . " ";
-    $cmd .= $settings->{$game}{'isLobby'} . " true ";
-    $cmd .= $settings->{$game}{'isRestricted'} . " " . $game;
+    $cmd .= $islobby . " true ";
+    $cmd .= $isrestricted . " " . $game;
 
     sendCommand( command => $cmd, game => $gateway, node => $node );
     sleep(0.5);
@@ -1548,6 +1578,77 @@ sub deployGame {
     }
 }
 
+#infoNode( node => 'node5' );
+sub infoNode {
+    my %args = ( 
+        node => '',
+        user => 'minecraft',
+        @_,         # argument pair list goes here
+    );
+
+    my $output = {};
+    my %output = %$output;
+    
+    my $node = $args{'node'};
+    my $user = $args{'user'};
+    my ($islobby, $isrestricted, $cmd);
+
+    my $ip          = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $node, 
+        hash_ref    => 'false' );
+
+
+    my @cpu_cmd     = q(mpstat -P ALL 2>&1);
+    my @pid_cmd     = q+pidstat --human -U $(whoami)+;
+    my @mem_cmd     = q(free -wh;echo; vmstat -wSMa 2>&1; numastat -m -n);
+    my $net_cmd     = q~vnstat -hg -i $(vnstat | sed -n 's/^[ \t]*\([^:]*\):$/\1/p' | tr '\n' '+' | sed 's/+$//') 2>&1; ~;
+       $net_cmd    .= q~vnstat -d -i $(vnstat | sed -n 's/^[ \t]*\([^:]*\):$/\1/p' | tr '\n' '+' | sed 's/+$//') 2>&1;~;
+       $net_cmd    .= q~echo;ip -s link~;
+    my $con_cmd     = q%ss -Hturp | awk -F'[ ")(:,]*' '$7 !~ /'"$(dig +short -x %;
+       $con_cmd    .= q%$(hostname -I | awk '{print $1}') | awk -F. '{print $2}' %;
+       $con_cmd    .= q+)"'|^[ \t]*$|localhost/ {printf "%s %-5s %-5s %-7s <=> %7s %40s \n"  ,$10,$3,$4,$6,$8,$7}' | sort -n -k4 -n -k3+;
+    my $io_cmd      = 'iostat -h 2>&1';
+    my $df_cmd      = 'df -h $(pwd) 2>&1; printf "\n\n"; df -hT --total';
+    my $neo_cmd     = 'neofetch --stdout 2>&1';
+    my $du_cmd      = 'echo $(pwd); du -shc * 2>&1 | sort -h';
+
+
+my $iperf ="
+Field	Meaning of Non-Zero Values
+errors	Poorly or incorrectly negotiated mode and speed, or damaged network cable.
+dropped	Possibly due to iptables or other filtering rules, more likely due to lack of network buffer memory.
+overrun	Number of times the network interface ran out of buffer space.
+carrier	Damaged or poorly connected network cable, or switch problems.
+collsns	Number of collisions, which should always be zero on a switched LAN. 
+         Non-zero indicates problems negotiating appropriate duplex mode. 
+         A small number that never grows means it happened when the interface came up but hasn't happened since.
+";
+
+
+
+     unless ( connectSSH( user => $user, ip => $ip ) ) {
+        $output{'1_cpu'} = $SSH_connections{$user.$ip}->capture(@cpu_cmd);
+        $output{'2_mem'} = $SSH_connections{$user.$ip}->capture(@mem_cmd);
+        $output{'4_net'} = $SSH_connections{$user.$ip}->capture($net_cmd) . $iperf;
+        $output{'5_inet'} = $SSH_connections{$user.$ip}->capture($con_cmd);
+        $output{'6_io'}  = $SSH_connections{$user.$ip}->capture($io_cmd);
+        $output{'7_disk'}  = $SSH_connections{$user.$ip}->capture($df_cmd);
+        $output{'0_neo'}  = $SSH_connections{$user.$ip}->capture($neo_cmd);
+        $output{'3_proc'}  = $SSH_connections{$user.$ip}->capture(@pid_cmd);
+        $output{'8_files'}  = $SSH_connections{$user.$ip}->capture($du_cmd);
+        
+    }
+    else {
+        $output{'error'} = "$node is offline!";
+    }
+    
+    return \%output;
+}
+
+
 app->start;
 
 
@@ -1695,6 +1796,7 @@ __DATA__
 
 
             <div class="media mt-2">
+              <a href="/info/<%= $node %>" class="list-group-item-action list-group-item-light">
                 <img class="align-self-top mr-1 mt-2 mb-2" 
                   src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
                   alt="Generic placeholder image" height="80">
@@ -1702,6 +1804,7 @@ __DATA__
                 <h3>
                     <%= $node %>
                 </h3>
+              </a>
             </div>
 
 
@@ -2161,8 +2264,9 @@ pre {
 </script>
 
 
+
+
 @@ files.html.ep
-% layout 'auth';
 % layout 'default';
 <!DOCTYPE html>
 
@@ -2185,6 +2289,40 @@ pre {
 
 
     </div>  
+</body>
+</html>
+
+
+
+
+@@ node_details.html.ep
+% layout 'default';
+<!DOCTYPE html>
+
+<html>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+        <div class="alert alert-success" role="alert">
+          <h4 class="alert-heading"> debug info for <%= $node %></h4>
+        </div>
+
+
+%   my %results = %$results;
+
+%  foreach my $title (sort keys %results) { 
+        <h3> <%= $title %> </h3> <hr>
+    
+%      my $info    =  $results{$title};
+%#         $info    =~ s/ /\&nbsp;/g;
+%      my @lines   = split(/\n/, $info);
+    <pre>
+%    foreach my $out ( @lines ) {
+       <%= $out %>
+    % }
+    </pre>
+% }
+
+</div>
 </body>
 </html>
 
