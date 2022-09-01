@@ -1599,6 +1599,12 @@ sub infoNode {
         field       => 'name',
         value       => $node, 
         hash_ref    => 'false' );
+    my $game_ports  = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'node',
+        value       => $node, 
+        hash_ref    => 'true' );
 
 
     my @cpu_cmd     = q(mpstat -P ALL 2>&1);
@@ -1609,12 +1615,21 @@ sub infoNode {
        $net_cmd    .= q~echo;ip -s link~;
     my $con_cmd     = q%ss -Hturp | awk -F'[ ")(:,]*' '$7 !~ /'"$(dig +short -x %;
        $con_cmd    .= q%$(hostname -I | awk '{print $1}') | awk -F. '{print $2}' %;
-       $con_cmd    .= q+)"'|^[ \t]*$|localhost/ {printf "%s %-5s %-5s %-7s <=> %7s %40s \n"  ,$10,$3,$4,$6,$8,$7}' | sort -n -k4 -n -k3+;
+       $con_cmd    .= q+)"'|^[ \t]*$|localhost/ {printf "%s %-5s %-5s %-7s <=> %7s %40s \n"  ,$10,$3,$4,$6,$8,$7}' | sort -n -k4 -n -k3;echo;+;
     my $io_cmd      = 'iostat -h 2>&1';
     my $df_cmd      = 'df -h $(pwd) 2>&1; printf "\n\n"; df -hT --total';
     my $neo_cmd     = 'neofetch --stdout 2>&1';
     my $du_cmd      = 'echo $(pwd); du -shc * 2>&1 | sort -h';
 
+foreach my $game ( sort keys %{$game_ports}) {
+        next if ( $game_ports->{$game}{'enabled'} eq '0' );
+#       $con_cmd    .= qq%printf"$game_ports->{$game}{'name'}: " ss -Htu  state established '( sport = :"game_ports->{$game}{'port'}" or dport = :"game_ports->{$game}{'port'}" ) | wc -l;'%;
+        $con_cmd    .= "printf '%-30s' 'Connections to " . $game_ports->{$game}{'name'};
+        $con_cmd    .= ": ' ; ss -Htu  state established '( sport = :";
+        $con_cmd    .= $game_ports->{$game}{'port'} . " )' | wc -l;";
+}
+
+print "$con_cmd\n";
 
 my $iperf ="
 Field	Meaning of Non-Zero Values
@@ -1631,13 +1646,13 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
 
      unless ( connectSSH( user => $user, ip => $ip ) ) {
         $output{'1_cpu'} = $SSH_connections{$user.$ip}->capture(@cpu_cmd);
-        $output{'2_mem'} = $SSH_connections{$user.$ip}->capture(@mem_cmd);
-        $output{'4_net'} = $SSH_connections{$user.$ip}->capture($net_cmd) . $iperf;
-        $output{'5_inet'} = $SSH_connections{$user.$ip}->capture($con_cmd);
+        $output{'3_mem'} = $SSH_connections{$user.$ip}->capture(@mem_cmd);
+        $output{'5_net'} = $SSH_connections{$user.$ip}->capture($net_cmd) . $iperf;
+        $output{'2_inet'} = $SSH_connections{$user.$ip}->capture($con_cmd);
         $output{'6_io'}  = $SSH_connections{$user.$ip}->capture($io_cmd);
         $output{'7_disk'}  = $SSH_connections{$user.$ip}->capture($df_cmd);
         $output{'0_neo'}  = $SSH_connections{$user.$ip}->capture($neo_cmd);
-        $output{'3_proc'}  = $SSH_connections{$user.$ip}->capture(@pid_cmd);
+        $output{'4_proc'}  = $SSH_connections{$user.$ip}->capture(@pid_cmd);
         $output{'8_files'}  = $SSH_connections{$user.$ip}->capture($du_cmd);
         
     }
@@ -1679,6 +1694,7 @@ __DATA__
     width: 78px !important;
     margin-right: 3px;
     }
+    .data a, .data span, .data tr, .data td { white-space: pre; }
   </style>
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
   <symbol id="check-circle-fill" fill="currentColor" viewBox="0 0 16 16">
@@ -2298,17 +2314,13 @@ pre {
 @@ node_details.html.ep
 % layout 'default';
 <!DOCTYPE html>
-
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
         <div class="alert alert-success" role="alert">
           <h4 class="alert-heading"> debug info for <%= $node %></h4>
         </div>
-
-
 %   my %results = %$results;
-
 %  foreach my $title (sort keys %results) { 
         <h3> <%= $title %> </h3> <hr>
     
@@ -2321,8 +2333,6 @@ pre {
     % }
     </pre>
 % }
-
 </div>
 </body>
 </html>
-
