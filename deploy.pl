@@ -1,18 +1,14 @@
 
 use v5.28;
-use Mojolicious::Lite -signatures; #, -async_await;
+use Mojolicious::Lite -signatures;
 use Mojo::mysql;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
 use IO::Socket::SSL;
-# use Mojo::Base 'Mojolicious::Controller';
-# use Future::AsyncAwait;
-
 use Minion;
 use Net::OpenSSH;
 use DBD::mysql;
 use DBI;
-# use DBIx::Class::ResultSet;
 use Carp         qw( croak );
 use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
@@ -27,13 +23,6 @@ use lib dirname (__FILE__) . "/lib/Game";
 #use Game;
 use strict;
 use warnings;
-
-# Make admin ui available under "/minion"
-plugin 'Minion::Admin';
-# Secure access to the admin ui with Basic authentication
-# Secure access to the admin ui with Basic authentication
-
-
 
 plugin 'AutoReload';
 
@@ -51,9 +40,6 @@ my $ref;                # HASH reference for DB results
 my %settings;           # HASH storing the DB settings
 my %User_Preferences;
 my $users;
-#my %DBgames;            # HASH storing DB gamesettings
-#my %DBglobals;          # Hash storing global variables
-#my %DBnodes;            # HASH sotring nodes from DB
 my %SSH_connections;    # HASH Storing ssh connections
 
 my $DBgames   = {}; my %DBgames     = %$DBgames;    
@@ -73,7 +59,7 @@ my $online_nodes;       #
 my $log_conf;           #
 my @gateway_name;
 my $gatewayName;
-# my ($args, %args);
+
 
 my $debug = 'false';    # Print out settings returned from DB
 
@@ -102,30 +88,111 @@ my $log = Log::Log4perl::get_logger();
 
 
 
-
-
-
 ###########################################################
-## Minion Functions
+##               Configure Yancy
 ###########################################################
 
 
-plugin 'Minion::Admin' => {route => app->routes->any('/minion')};
-
-get '/minion' => sub ($c) {
-  return 1 if $c->req->url->to_abs->userinfo eq 'Bender:rocks';
-  $c->res->headers->www_authenticate('Basic');
-  $c->render(text => 'Authentication required!', status => 401);
-  return undef;
+plugin Yancy => {
+    backend => { mysql => $db },
+    # Read the schema configuration from the database
+    read_schema => 1,
+    schema => {
+        games => {
+            # Show these columns in the Yancy editor
+            'x-list-columns'    => [qw( name node release port mem_max store enabled isBungee )],
+        },
+        nodes => {
+            'x-list-clomuns'    => [qw( name ip enabled isGateway )],
+        },
+        
+        gs_plugin_settings      => { 'x-hidden' => 'true' },
+        global_settings         => { 'x-hidden' => 'true' },
+        minion_jobs_depends     => { 'x-ignore' => 'true'},
+        minion_workers_inbox    => { 'x-ignore' => 'true'},
+        mojo_pubsub_subscribe   => { 'x-ignore' => 'true'},
+        isOnline => { 'x-ignore' => 'true'},
+        users => {
+            'x-id-field' => 'email',
+            required => [ 'email', 'password' ],
+            properties => {
+                email => {
+                    type => 'string',
+                    format => 'email',
+                },
+                password => {
+                    type => 'string',
+                    format => 'password',
+                },
+                is_admin => {
+                    type => 'boolean',
+                    default => 0,
+                },
+            },
+        },
+        
+    },
+    editor => {
+        require_user => { is_admin => 1 },
+    },
 };
 
-## Update #################################################
 
 
 
+
+###########################################################
+##    Authentication
+###########################################################
+#app->renderer->cache->max_keys(0);
+app->sessions->default_expiration( 24 * 60 * 60 );
+
+
+
+app->yancy->plugin( 'Auth::Password' => {
+    schema => 'users',
+    allow_register => 1,
+    username_field => 'email',
+    password_field => 'password',
+    password_digest => {
+        type => 'Bcrypt',
+        cost => 12,
+        salt => 'secret_salt12345',
+    },
+} );
+
+
+group {
+    my $route = under 'minion' => sub ($c) {
+        my $name = $c->yancy->auth->current_user || '';
+        if ( $name ne '' ) {
+            return 1;
+        }
+        $c->res->headers->www_authenticate('Basic');
+        return undef;
+    };
+    plugin 'Minion::Admin' => {route => $route};
+};
+
+
+under sub ($c) { 
+  # Authenticated
+  my $name = $c->yancy->auth->current_user || '';
+  if ( $name ne '' ) {
+  return 1;
+  }
+  $c->render( template => 'login' );
+  return;
+};
+
+
+###########################################################
+##  Minion Routes
+###########################################################
 
 get '/update/:game/:node' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
+
     my $task = 'update' ;
     my $game = $c->stash('game');
     my $node = $c->stash('node');
@@ -155,7 +222,7 @@ app->minion->add_task(update => sub ($job, $game) {
 ## Boot   #################################################
 
 get '/boot/:game/:node' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $task = 'boot' ;
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -199,7 +266,7 @@ app->minion->add_task(boot => sub ($job, $game) {
 ## Halt ###################################################
 
 get '/halt/:game/:node' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $task = 'halt' ;
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -232,7 +299,7 @@ app->minion->add_task(halt => sub ($job, $game) {
 ## Deploy #################################################
 
 get '/deploy/:game/:node' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $task = 'deploy' ;
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -261,7 +328,7 @@ app->minion->add_task(deploy => sub ($job, $game) {
 ## Store #################################################
 
 get '/store/:game/:node' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $task = 'store';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -291,7 +358,7 @@ app->minion->add_task(store => sub ($job, $game) {
 ## Link ###################################################
 
 get '/link/:game/:node' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $task = 'link';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -323,7 +390,7 @@ app->minion->add_task(link => sub ($job, $game) {
 ## Drop #################################################
 
 get '/drop/:game/:node' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $task = 'drop';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
@@ -353,90 +420,16 @@ app->minion->add_task(drop => sub ($job, $game) {
 
 
 
-
-
-###########################################################
-##               Configure Yancy
-###########################################################
-
-
-plugin Yancy => {
-    backend => { mysql => $db },
-    # Read the schema configuration from the database
-    read_schema => 1,
-    schema => {
-        games => {
-            # Show these columns in the Yancy editor
-            'x-list-columns'    => [qw( name node release port mem_max store enabled isBungee )],
-        },
-        nodes => {
-            'x-list-clomuns'    => [qw( name ip enabled isGateway )],
-        },
-        
-        gs_plugin_settings      => { 'x-hidden' => 'true' },
-        global_settings         => { 'x-hidden' => 'true' },
-        minion_jobs_depends     => { 'x-ignore' => 'true'},
-        minion_workers_inbox    => { 'x-ignore' => 'true'},
-        mojo_pubsub_subscribe   => { 'x-ignore' => 'true'},
-        isOnline => { 'x-ignore' => 'true'},
-        users => {
-            'x-id-field' => 'email',
-            required => [ 'email', 'password' ],
-            properties => {
-                email => {
-                    type => 'string',
-                    format => 'email',
-                },
-                password => {
-                    type => 'string',
-                    format => 'password',
-                
-                },
-                is_admin => {
-                    type => 'boolean',
-                    default => 0,
-                },
-            },
-        },
-        
-    },
-    editor => {
-        require_user => { is_admin => 1 },
-    },
-};
-
-app->yancy->plugin( 'Auth::Password' => {
-    schema => 'users',
-    allow_register => 1,
-    username_field => 'email',
-    password_field => 'password',
-    password_digest => {
-        type => 'SHA-1',
-    },
-} );
-
-
-get '/yancy#/*'       => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
-};
-
-
-
-
 ###########################################################
 ##          Routing            
 ###########################################################
 
 
 
-
-
-
 get '/' => sub ($c) {
-#my $user = $c->yancy->auth->current_user
-#       || return $c->yancy->auth->login_form;
+#
 
-## return $c->redirect_to('/login') unless $c->is_user_authenticated;
+#
     my $results         =  checkIsOnline( 
         list_by         => 'node', 
         node            => '',
@@ -450,14 +443,15 @@ get '/' => sub ($c) {
         hash_ref        => 'true' );
                            
     $c->stash( nodes    => $results, 
-               expected => $expected );
+               expected => $expected
+              );
                
     $c->render(template => 'index' );
 };
 
 
 get '/log/:node/:game'  => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $game            = $c->stash('game');
     my $node            = $c->stash('node');
 
@@ -472,7 +466,7 @@ get '/log/:node/:game'  => sub ($c) {
 
 
 get '/info/:node/'  => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
 
     my $node            = $c->stash('node');
 
@@ -484,7 +478,7 @@ get '/info/:node/'  => sub ($c) {
 
 
 get '/node/:node'       => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $node            = $c->stash('node');
     my $results         = checkIsOnline( 
         list_by         => 'node', 
@@ -518,7 +512,7 @@ get '/node/:node'       => sub ($c) {
 
 
 get '/files/:game'      => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $game            = $c->stash('game');
     my @results         = getFiles(game => $game);
     
@@ -527,7 +521,7 @@ get '/files/:game'      => sub ($c) {
 };
 
 get '/debug/:node/:game' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $node            = $c->stash('node');
     my $game            = $c->stash('node');
     my ($results, $expected);
@@ -552,7 +546,7 @@ get '/debug/:node/:game' => sub ($c) {
 };
 
 get '/move/:node/:game' => sub ($c) {
-# return $c->redirect_to('/login') unless $c->is_user_authenticated;
+
     my $node            = $c->stash('node');
     my $game            = $c->stash('node');
     my ($results, $expected);
@@ -576,72 +570,7 @@ get '/move/:node/:game' => sub ($c) {
         expected        => $expected);
 };
 
-
-
-###########################################################
-##  Authentication
-###########################################################
-{
-   my %db = (
-      foo => {pass => 'FOO', name => 'Foo De Pois'},
-      bar => {pass => 'BAZ', name => 'Bar Auangle'},
-   );
-   sub load_account ($u) { return $db{$u} // undef }
-   sub validate ($u, $p) {
-      warn "user<$u> pass<$p>\n";
-      my $account = load_account($u) or return;
-      return $account->{pass} eq $p;
-   }
-}
-
-app->plugin(
-   Authentication => {
-      load_user     => sub ($app, $uid) { load_account($uid) },
-      validate_user => sub ($c, $u, $p, $e) { validate($u, $p) ? $u : () },
-   }
-);
-
-app->hook(
-   before_render => sub ($c, $args) {
-      my $user = $c->is_user_authenticated ? $c->current_user : undef;
-      $c->stash(user => $user);
-      return $c;
-   }
-);
-
-get '/login' => sub ($c) { $c->render(template => 'login') };
-
-post '/login' => sub ($c) {
-   my $username = $c->param('username');
-   my $password = $c->param('password');
-   my $auth_ok = $c->authenticate($username, $password);
-   $c->redirect_to($auth_ok ? 'private' : 'login');
-   return;
-};
-
-get '/private' => sub ($c) {
-   # return $c->redirect_to('/login') unless $c->is_user_authenticated;
-   return $c->render(template => 'private');
-};
-
-post '/logout' => sub ($c) {
-   $c->yancy->auth->logout;
-   $c->logout if $c->is_user_authenticated;
-   return $c->redirect_to('/');
-};
-
-get '/logout' => sub ($c) {
-   $c->yancy->auth->logout;
-   $c->redirect_to('/');
-};
-
-under '/authenticated' => sub ($c) {
-   return 1 if $c->is_user_authenticated;
-   $c->redirect_to('/login');
-   return 0;
-};
-
-get '*' => sub ($c) { return $c->render(status => 404) };
+# any '*' => sub ($c) { $c->render(template => 'login') };
 
 
 ###########################################################
@@ -883,6 +812,7 @@ sub checkIsOnline {
         field       => 'enabled', 
         value       => '1',
         hash_ref    => 'true' );
+        
 
     my %enabledNodes = %$enabledNodes;
     my @live_nodes;
@@ -1427,13 +1357,13 @@ sub storeGame {
     my $ip        = readFromDB( table => 'nodes',
                                column => 'ip',
                                 field => 'name',
-                                value => $settings{$game}{'node'},
+                                value => $settings->{$game}{'node'},
                              hash_ref => 'false' );
     
     my $sip       = readFromDB( table => 'nodes',
                                column => 'ip',
                                 field => 'name',
-                                value => $settings{$game}{'store'},
+                                value => $settings->{$game}{'store'},
                              hash_ref => 'false' );
 
 
@@ -1484,7 +1414,7 @@ sub bootGame {
         table       => 'nodes',
         column      => 'ip',
         field       => 'name',
-        value       => $settings{$game}{'node'},
+        value       => $settings->{$game}{'node'},
         hash_ref    => 'false' );
                                  
     my $invocation;
@@ -1545,25 +1475,25 @@ sub deployGame {
     my $ip        = readFromDB( table => 'nodes',
                                column => 'ip',
                                 field => 'name',
-                                value => $settings{$game}{'node'},
+                                value => $settings->{$game}{'node'},
                              hash_ref => 'false' );
     
     my $sip       = readFromDB( table => 'nodes',
                                column => 'ip',
                                 field => 'name',
-                                value => $settings{$game}{'store'},
+                                value => $settings->{$game}{'store'},
                              hash_ref => 'false' );
                              
     
     $log->info("deployGamerserver: $game");
 
-    $user        = $settings{$game}{"node_usr"};
-    $suser       = $settings{$game}{"store_usr"};
+    $user        = $settings->{$game}{'node_usr'};
+    $suser       = $settings->{$game}{'store_usr'};
 
     $cp_to      = $user . "@" . $ip . ":";
-    $cp_to     .= $settings{$game}{"node_path"} . "/";
+    $cp_to     .= $settings->{$game}{'node_path'} . "/";
 
-    $cp_from    = $settings{$game}{"store_path"} . "/" . $game;
+    $cp_from    = $settings->{$game}{'store_path'} . "/" . $game;
 
 
     my $rsync_cmd = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
@@ -1622,11 +1552,10 @@ sub infoNode {
     my $du_cmd      = 'echo $(pwd); du -shc * 2>&1 | sort -h';
 
 foreach my $game ( sort keys %{$game_ports}) {
-        next if ( $game_ports->{$game}{'enabled'} eq '0' );
-#       $con_cmd    .= qq%printf"$game_ports->{$game}{'name'}: " ss -Htu  state established '( sport = :"game_ports->{$game}{'port'}" or dport = :"game_ports->{$game}{'port'}" ) | wc -l;'%;
-        $con_cmd    .= "printf '%-30s' 'Connections to " . $game_ports->{$game}{'name'};
-        $con_cmd    .= ": ' ; ss -Htu  state established '( sport = :";
-        $con_cmd    .= $game_ports->{$game}{'port'} . " )' | wc -l;";
+    next if ( $game_ports->{$game}{'enabled'} eq '0' );
+    $con_cmd    .= "printf '%-30s' 'Connections to " . $game_ports->{$game}{'name'};
+    $con_cmd    .= ": ' ; ss -Htu  state established '( sport = :";
+    $con_cmd    .= $game_ports->{$game}{'port'} . " )' | wc -l;";
 }
 
 print "$con_cmd\n";
@@ -1719,9 +1648,11 @@ __DATA__
       <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
     </a>
     
-    
+
    <div class="container" id="navbarNav">
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+      
+      % if ( $c->yancy->auth->current_user ) {
         <li class="nav-item">
           <a class="nav-link active" aria-current="page" href="/">home</a>
         </li>
@@ -1740,17 +1671,13 @@ __DATA__
         <li class="nav-item">
           <a class="nav-link" href="https://discord.com/channels/697634318067040327/697634318608236556">discord</a>
         </li>
-  
-      <li class="nav-item">
-            % if (defined $user) {
 
-            <form action="/logout" method="post" style="display: inline" class="form-inline form-control mr-sm-2"  >
-                   <button type="submit" style="background: none!important; border: none; padding: 0!important;
-                   text-decoration: underline; cursor: pointer; color: #069;" class="btn btn-outline-success my-2 my-sm-0">Logout <%= $user->{name} %></button>
-            </form> 
-            
-            % }
+        <li class="nav-item">
+        %= link_to Logout => '/yancy/auth/password/logout'
+    
+        
         </li>
+            % }
 
     % my $flash_message = $c->flash('message');
     % if ($flash_message) {
@@ -2333,6 +2260,25 @@ pre {
     % }
     </pre>
 % }
+</div>
+</body>
+</html>
+
+
+
+@@ login.html.ep
+% layout 'default';
+<!DOCTYPE html>
+<html>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+        <div class="alert alert-success" role="alert">
+          <h4 class="alert-heading"> login...</h4>
+        </div>
+
+%= $c->yancy->auth->login_form
+
+
 </div>
 </body>
 </html>
