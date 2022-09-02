@@ -4,9 +4,9 @@
 
 function start () {
 
-    screen -h 1024 -L -dmS mojo morbo myApp.pl
-    screen -h 1024 -L -dmS deploy perl deploy.pl
-     sleep 1
+    screen -h 1024 -L -dmS mojo perl deploy.pl daemon -m production -l http://*:3000
+    screen -h 1024 -L -dmS minion perl deploy.pl minion worker -m production -j 12
+    sleep 1
 
     screen -list
 
@@ -15,7 +15,7 @@ function start () {
 
 function stop () {
 
-    screen -list | awk -F '.' '/mojo/ || /deploy/ {print $1}' | xargs kill
+    screen -list | awk -F '.' '/mojo/ || /minion/ {print $1}' | xargs kill
     sleep 2
     
     screen -list
