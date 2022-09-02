@@ -35,7 +35,6 @@ my $db_host;            # From config file
 my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
-my $db_salt;
 my $sth;                # DB Syntax Handle
 my $ref;                # HASH reference for DB results
 my %settings;           # HASH storing the DB settings
@@ -146,9 +145,9 @@ plugin Yancy => {
 ##    Authentication
 ###########################################################
 #app->renderer->cache->max_keys(0);
-app->sessions->default_expiration( 24 * 60 * 60 );
+app->sessions->default_expiration( 1 * 60 * 60 );
 
-
+my $salt = pack "C16", map { int(128*rand()) } 0..15;
 
 app->yancy->plugin( 'Auth::Password' => {
     schema => 'users',
@@ -158,7 +157,7 @@ app->yancy->plugin( 'Auth::Password' => {
     password_digest => {
         type => 'Bcrypt',
         cost => 12,
-        salt => $db_salt,
+        salt => $salt,
     },
 } );
 
@@ -1211,7 +1210,6 @@ sub read_config_file {
     $db_user = $User_Preferences{'db_user'};
     $db_pass = $User_Preferences{'db_pass'};
     $db_name = $User_Preferences{'db_name'};
-    $db_salt = $User_Preferences{'db_salt'};
 }
 
 
