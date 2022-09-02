@@ -151,7 +151,7 @@ my $salt = pack "C16", map { int(128*rand()) } 0..15;
 
 app->yancy->plugin( 'Auth::Password' => {
     schema => 'users',
-    allow_register => 1,
+    allow_register => 0,
     username_field => 'email',
     password_field => 'password',
     password_digest => {
