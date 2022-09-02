@@ -571,7 +571,11 @@ get '/move/:node/:game' => sub ($c) {
         expected        => $expected);
 };
 
-# any '*' => sub ($c) { $c->render(template => 'login') };
+any '*' => sub ($c) {
+#$c->render(template => 'login') };
+    $c->flash(error => "page doesn't exist" );
+    $c->redirect_to("/");
+};
 
 
 ###########################################################
