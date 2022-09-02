@@ -35,6 +35,7 @@ my $db_host;            # From config file
 my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
+my $db_salt;
 my $sth;                # DB Syntax Handle
 my $ref;                # HASH reference for DB results
 my %settings;           # HASH storing the DB settings
@@ -157,7 +158,7 @@ app->yancy->plugin( 'Auth::Password' => {
     password_digest => {
         type => 'Bcrypt',
         cost => 12,
-        salt => $User_Preferences{'db_salt'},
+        salt => $db_salt,
     },
 } );
 
