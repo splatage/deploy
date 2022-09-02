@@ -157,7 +157,7 @@ app->yancy->plugin( 'Auth::Password' => {
     password_digest => {
         type => 'Bcrypt',
         cost => 12,
-        salt => 'secret_salt12345',
+        salt => $User_Preferences{'db_salt'},
     },
 } );
 
@@ -1206,6 +1206,7 @@ sub read_config_file {
     $db_user = $User_Preferences{'db_user'};
     $db_pass = $User_Preferences{'db_pass'};
     $db_name = $User_Preferences{'db_name'};
+    $db_salt = $User_Preferences{'db_salt'};
 }
 
 
@@ -1290,7 +1291,7 @@ sub haltGame {
 sub configLogger {
 
     $log_conf = q{
-        log4perl.category                   = INFO, Logfile, Screen, DBAppndr
+        log4perl.category                   = DEBUG, Logfile, Screen, DBAppndr
 
  
         log4perl.appender.Logfile           = Log::Log4perl::Appender::File
