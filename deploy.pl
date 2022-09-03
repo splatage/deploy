@@ -33,7 +33,7 @@ my $db_host;            # From config file
 my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
-my $sth;                # DB Syntax Handle
+#my $sth;                # DB Syntax Handle
 my $ref;                # HASH reference for DB results
 my %settings;           # HASH storing the DB settings
 my %User_Preferences;
@@ -147,9 +147,9 @@ my $settings = readFromDB(
     );
 
 foreach my $game (keys %{$settings}) {
-    $log->info("scheduled backup for $game");
-    $cron = $settings->{$game}{'crontab'} or $cron = '*/5 * * * *' ;
-    
+    $cron = $settings->{$game}{'crontab'} or $cron = int(rand(60)) . ' * * * *';
+    $log->info("scheduling backup for $game $cron");
+
     plugin Cron => ( $game => {crontab => $cron, code => sub {
         app->minion->enqueue( store => [$game], { attempts => 1 } );
      } } );
@@ -461,8 +461,6 @@ get '/' => sub ($c) {
     my $expected = readFromDB(
         table    => 'games',
         column   => 'name',
-        field    => 'enabled',
-        value    => '1',
         hash_ref => 'true'
     );
 
@@ -811,7 +809,7 @@ sub readFromDB {
     $query .= ";";
     $log->debug("$query");
 
-    $sth = $dbh->prepare($query);
+    my $sth = $dbh->prepare($query);
     $sth->execute();
 
     while ( $ref = $sth->fetchrow_hashref() ) {
@@ -849,16 +847,12 @@ sub checkIsOnline {
     my $enabledNodes = readFromDB(
         table    => 'nodes',
         column   => 'name',
-        field    => 'enabled',
-        value    => '1',
         hash_ref => 'true'
     );
 
     my $enabledGames = readFromDB(
         table    => 'games',
         column   => 'name',
-        field    => 'enabled',
-        value    => '1',
         hash_ref => 'true'
     );
 
