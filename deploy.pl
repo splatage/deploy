@@ -148,7 +148,8 @@ my $settings = readFromDB(
 
 foreach my $game (keys %{$settings}) {
     $log->info("scheduled backup for $game");
-    $cron = $settings->{$game}{'crontab'} or $cron = '0 * * * *' ;
+    $cron = $settings->{$game}{'crontab'} or $cron = '*/5 * * * *' ;
+    
     plugin Cron => ( $game => {crontab => $cron, code => sub {
         app->minion->enqueue( store => [$game], { attempts => 1 } );
      } } );
@@ -1421,15 +1422,15 @@ sub storeGame {
         hash_ref => 'false'
     );
 
-    $log->info("deployGamerserver: $game");
+    $log->info("storeGamerserver: $game");
 
-    $user  = $settings{$game}{"node_usr"};
-    $suser = $settings{$game}{"store_usr"};
+    $user  = $settings->{$game}{"node_usr"};
+    $suser = $settings->{$game}{"store_usr"};
 
     $cp_from = $user . "@" . $ip . ":";
-    $cp_from .= $settings{$game}{"node_path"} . "/" . $game;
+    $cp_from .= $settings->{$game}{"node_path"} . "/" . $game;
 
-    $cp_to = $settings{$game}{"store_path"} . "/";
+    $cp_to = $settings->{$game}{"store_path"} . "/";
 
     $log->debug(" $cp_from $cp_to ");
 
@@ -1440,7 +1441,7 @@ sub storeGame {
     );
     $output .=
       $SSH_connections{ $suser . $sip }->capture(
-"rsync -auv --delete --exclude='pugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
+"rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
       );
 
     return $output;
