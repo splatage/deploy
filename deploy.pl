@@ -1,6 +1,6 @@
 
 use v5.28;
-use Mojolicious::Lite -signatures;
+use Mojolicious::Lite -signatures, -async;
 use Mojo::mysql;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
@@ -17,15 +17,12 @@ use Time::Seconds;
 use Net::Ping;
 use Log::Log4perl;
 use Crypt::PBKDF2;
-
 use File::Basename;
-use lib dirname (__FILE__) . "/lib/Game";
-#use Game;
+use lib dirname(__FILE__) . "/lib/Game";
 use strict;
 use warnings;
 
 plugin 'AutoReload';
-
 
 ###########################################################
 ##         Declare Variables for Global Scope            ##
@@ -42,17 +39,17 @@ my %User_Preferences;
 my $users;
 my %SSH_connections;    # HASH Storing ssh connections
 
-my $DBgames   = {}; my %DBgames     = %$DBgames;    
-my $DBglobals = {}; my %DBglobals   = %$DBglobals;
-my $DBnodes   = {}; my %DBnodes     = %$DBnodes;        
+my $DBgames   = {};
+my %DBgames   = %$DBgames;
+my $DBglobals = {};
+my %DBglobals = %$DBglobals;
+my $DBnodes   = {};
+my %DBnodes   = %$DBnodes;
 
-
-
-my $enabledGames;      # 
-my $disabledGames;     #
-my $enabledNodes;      #
-my $disabledNodes;     #
-
+my $enabledGames;       #
+my $disabledGames;      #
+my $enabledNodes;       #
+my $disabledNodes;      #
 
 my %online_games;       #
 my $online_nodes;       #
@@ -60,8 +57,7 @@ my $log_conf;           #
 my @gateway_name;
 my $gatewayName;
 
-
-my $debug = 'false';    # Print out settings returned from DB
+my $debug = 'false';    
 
 ###########################################################
 ##   Database Connection                                 ##
@@ -70,13 +66,13 @@ my $debug = 'false';    # Print out settings returned from DB
 read_config_file('config/deploy.cfg');
 
 my $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
-       "$db_user", "$db_pass", { 'RaiseError' => 1 } );
-       
-my $db_string  = "mysql://" . $db_user . ":" .$db_pass . "@" . $db_host. "/" .$db_name;
+    "$db_user", "$db_pass", { 'RaiseError' => 1 } );
+
+my $db_string =
+  "mysql://" . $db_user . ":" . $db_pass . "@" . $db_host . "/" . $db_name;
 my $db = Mojo::mysql->strict_mode($db_string);
 
-plugin Minion => {mysql => "$db_string"};
-
+plugin Minion => { mysql => "$db_string" };
 
 ## Logging
 
@@ -84,62 +80,58 @@ configLogger();
 Log::Log4perl::init( \$log_conf );
 
 my $log = Log::Log4perl::get_logger();
-   $log->info("Hello! Starting...");
-
-
+$log->info("Hello! Starting...");
 
 ###########################################################
 ##               Configure Yancy
 ###########################################################
 
-
 plugin Yancy => {
     backend => { mysql => $db },
+
     # Read the schema configuration from the database
     read_schema => 1,
-    schema => {
+    schema      => {
         games => {
+
             # Show these columns in the Yancy editor
-            'x-list-columns'    => [qw( name node release port mem_max store enabled isBungee )],
+            'x-list-columns' =>
+              [qw( name node release port mem_max store enabled isBungee )],
         },
         nodes => {
-            'x-list-clomuns'    => [qw( name ip enabled isGateway )],
+            'x-list-clomuns' => [qw( name ip enabled isGateway )],
         },
-        
-        gs_plugin_settings      => { 'x-hidden' => 'true' },
-        global_settings         => { 'x-hidden' => 'true' },
-        minion_jobs_depends     => { 'x-ignore' => 'true'},
-        minion_workers_inbox    => { 'x-ignore' => 'true'},
-        mojo_pubsub_subscribe   => { 'x-ignore' => 'true'},
-        isOnline => { 'x-ignore' => 'true'},
-        users => {
+
+        gs_plugin_settings    => { 'x-hidden' => 'true' },
+        global_settings       => { 'x-hidden' => 'true' },
+        minion_jobs_depends   => { 'x-ignore' => 'true' },
+        minion_workers_inbox  => { 'x-ignore' => 'true' },
+        mojo_pubsub_subscribe => { 'x-ignore' => 'true' },
+        isOnline              => { 'x-ignore' => 'true' },
+        users                 => {
             'x-id-field' => 'email',
-            required => [ 'email', 'password' ],
-            properties => {
+            required     => [ 'email', 'password' ],
+            properties   => {
                 email => {
-                    type => 'string',
+                    type   => 'string',
                     format => 'email',
                 },
                 password => {
-                    type => 'string',
+                    type   => 'string',
                     format => 'password',
                 },
                 is_admin => {
-                    type => 'boolean',
+                    type    => 'boolean',
                     default => 0,
                 },
             },
         },
-        
+
     },
     editor => {
         require_user => { is_admin => 1 },
     },
 };
-
-
-
-
 
 ###########################################################
 ##    Authentication
@@ -147,20 +139,21 @@ plugin Yancy => {
 #app->renderer->cache->max_keys(0);
 app->sessions->default_expiration( 1 * 60 * 60 );
 
-my $salt = pack "C16", map { int(128*rand()) } 0..15;
+my $salt = pack "C16", map { int( 128 * rand() ) } 0 .. 15;
 
-app->yancy->plugin( 'Auth::Password' => {
-    schema => 'users',
-    allow_register => 0,
-    username_field => 'email',
-    password_field => 'password',
-    password_digest => {
-        type => 'Bcrypt',
-        cost => 12,
-        salt => $salt,
-    },
-} );
-
+app->yancy->plugin(
+    'Auth::Password' => {
+        schema          => 'users',
+        allow_register  => 0,
+        username_field  => 'email',
+        password_field  => 'password',
+        password_digest => {
+            type => 'Bcrypt',
+            cost => 12,
+            salt => $salt,
+        },
+    }
+);
 
 group {
     my $route = under 'minion' => sub ($c) {
@@ -171,20 +164,19 @@ group {
         $c->res->headers->www_authenticate('Basic');
         return undef;
     };
-    plugin 'Minion::Admin' => {route => $route};
+    plugin 'Minion::Admin' => { route => $route };
 };
 
+under sub ($c) {
 
-under sub ($c) { 
-  # Authenticated
-  my $name = $c->yancy->auth->current_user || '';
-  if ( $name ne '' ) {
-  return 1;
-  }
-  $c->render( template => 'login' );
-  return;
+    # Authenticated
+    my $name = $c->yancy->auth->current_user || '';
+    if ( $name ne '' ) {
+        return 1;
+    }
+    $c->render( template => 'login' );
+    return;
 };
-
 
 ###########################################################
 ##  Minion Routes
@@ -192,138 +184,146 @@ under sub ($c) {
 
 get '/update/:game/:node' => sub ($c) {
 
-
-    my $task = 'update' ;
+    my $task = 'update';
     my $game = $c->stash('game');
     my $node = $c->stash('node');
-      
-   # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 2});
-    $c->flash(message => "sending minions to $task $game on $node " );
+
+    # $c->minion->enqueue($task => [$game],{queue => $game});
+    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
-app->minion->add_task(update => sub ($job, $game) {
-    my $task = 'update' ;
-    my $lock = $game;
-    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 1200);
+app->minion->add_task(
+    update => sub ( $job, $game ) {
+        my $task = 'update';
+        my $lock = $game;
+        return $job->finish(
+            "Previous job $task for $game is still active. Refusing to proceed")
+          unless app->minion->lock( $lock, 1200 );
 
-    $job->app->log->info("Job: $task $game begins");
-    sleep 5;
-        
-    my $result = `hostname`;
+        $job->app->log->info("Job: $task $game begins");
+        sleep 5;
 
-    $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed", output => $result});
-    app->minion->unlock($lock);
-});
+        my $result = `hostname`;
 
+        $job->app->log->info("$task $game completed");
+        $job->finish(
+            { message => "$task $game completed", output => $result } );
+        app->minion->unlock($lock);
+    }
+);
 
 ## Boot   #################################################
 
 get '/boot/:game/:node' => sub ($c) {
 
-    my $task = 'boot' ;
+    my $task = 'boot';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
-      
-       # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 1});
-    
-    $c->flash(message => "sending minions to $task $game on $node " );
+
+    # $c->minion->enqueue($task => [$game],{queue => $game});
+    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
+
+    $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
-app->minion->add_task(boot => sub ($job, $game) {
-    my $task = 'boot' ;
-    my $lock = $game;
-    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 1200);
+app->minion->add_task(
+    boot => sub ( $job, $game ) {
+        my $task = 'boot';
+        my $lock = $game;
+        return $job->finish(
+            "Previous job $task for $game is still active. Refusing to proceed")
+          unless app->minion->lock( $lock, 1200 );
 
+        my $deploy = deployGame( game => $game );
+        $job->note( deploy => $deploy );
 
-      my $deploy = deployGame(game => $game);
-         $job->note(deploy => $deploy);
-        
-      my $update = update( game => $game );
-         $job->note(update => $update);
-         
-      my $boot   = bootGame(game => $game, server_bin => $update);
-         $job->note(boot => $boot);
-        
-      my $regist = registerGame(game => $game);
-         $job->note(register => $regist);
+        my $update = update( game => $game );
+        $job->note( update => $update );
 
-    $job->app->log->info("$task $game completed");
-    unless ($boot) {
-        $job->finish({message => "$task $game completed"});
-    } 
-    else {
-        $job->fail({message => "$task $game failed"});
+        my $boot = bootGame( game => $game, server_bin => $update );
+        $job->note( boot => $boot );
+
+        my $regist = registerGame( game => $game );
+        $job->note( register => $regist );
+
+        $job->app->log->info("$task $game completed");
+        unless ($boot) {
+            $job->finish( { message => "$task $game completed" } );
+        }
+        else {
+            $job->fail( { message => "$task $game failed" } );
+        }
+        app->minion->unlock($lock);
     }
-    app->minion->unlock($lock);
-});
-
+);
 
 ## Halt ###################################################
 
 get '/halt/:game/:node' => sub ($c) {
 
-    my $task = 'halt' ;
+    my $task = 'halt';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
-      
-       # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 1});
-    $c->flash(message => "sending minions to $task $game on $node " );
+
+    # $c->minion->enqueue($task => [$game],{queue => $game});
+    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
+    $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
-app->minion->add_task(halt => sub ($job, $game) {
-    my $task = 'halt' ;
-    my $lock = $game;
-    return $job->fail("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 60);
+app->minion->add_task(
+    halt => sub ( $job, $game ) {
+        my $task = 'halt';
+        my $lock = $game;
+        return $job->fail(
+            "Previous job $task for $game is still active. Refusing to proceed")
+          unless app->minion->lock( $lock, 60 );
 
-    $job->app->log->info("Job: $task $game begins");
+        $job->app->log->info("Job: $task $game begins");
 
-    my $store  = storeGame(game => $game);
-                $job->note(storegame => $store);
-    my $halt   = haltGame( game => $game);
-                $job->note(halt => $halt);
-        
-    $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed"});
-    
-    app->minion->unlock($lock);
-});
+        my $store = storeGame( game => $game );
+        $job->note( storegame => $store );
+        my $halt = haltGame( game => $game );
+        $job->note( halt => $halt );
 
+        $job->app->log->info("$task $game completed");
+        $job->finish( { message => "$task $game completed" } );
+
+        app->minion->unlock($lock);
+    }
+);
 
 ## Deploy #################################################
 
 get '/deploy/:game/:node' => sub ($c) {
 
-    my $task = 'deploy' ;
+    my $task = 'deploy';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
-      
-       # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 2});
-    $c->flash(message => "sending minions to $task $game on $node " );
+
+    # $c->minion->enqueue($task => [$game],{queue => $game});
+    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
-app->minion->add_task(deploy => sub ($job, $game) {
-    my $task = 'deploy' ;
-    my $lock = $game;
-    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 1200);
+app->minion->add_task(
+    deploy => sub ( $job, $game ) {
+        my $task = 'deploy';
+        my $lock = $game;
+        return $job->finish(
+            "Previous job $task for $game is still active. Refusing to proceed")
+          unless app->minion->lock( $lock, 1200 );
 
-    $job->app->log->info("Job: $task $game begins");
-        
-    my $output = deployGame(game => $game);
+        $job->app->log->info("Job: $task $game begins");
 
-    $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed", deploy => $output});
-    app->minion->unlock($lock);
-});
+        my $output = deployGame( game => $game );
 
+        $job->app->log->info("$task $game completed");
+        $job->finish(
+            { message => "$task $game completed", deploy => $output } );
+        app->minion->unlock($lock);
+    }
+);
 
 ## Store #################################################
 
@@ -332,28 +332,31 @@ get '/store/:game/:node' => sub ($c) {
     my $task = 'store';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
-      
-       # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 2});
-    $c->flash(message => "sending minions to $task $game on $node " );
+
+    # $c->minion->enqueue($task => [$game],{queue => $game});
+    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
-app->minion->add_task(store => sub ($job, $game) {
+app->minion->add_task(
+    store => sub ( $job, $game ) {
 
-    my $task = 'store' ;
-    my $lock = $game;
-    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 1200);
+        my $task = 'store';
+        my $lock = $game;
+        return $job->finish(
+            "Previous job $task for $game is still active. Refusing to proceed")
+          unless app->minion->lock( $lock, 1200 );
 
-    $job->app->log->info("Job: $task $game begins");
+        $job->app->log->info("Job: $task $game begins");
 
-    my $output = storeGame(game => $game);
+        my $output = storeGame( game => $game );
 
-    $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed", store => $output});
-    app->minion->unlock($lock);
-});
-
+        $job->app->log->info("$task $game completed");
+        $job->finish(
+            { message => "$task $game completed", store => $output } );
+        app->minion->unlock($lock);
+    }
+);
 
 ## Link ###################################################
 
@@ -362,30 +365,30 @@ get '/link/:game/:node' => sub ($c) {
     my $task = 'link';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
-     
-      
-       # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 2});
-    $c->flash(message => "sending minions to $task $game on $node " );
+
+    # $c->minion->enqueue($task => [$game],{queue => $game});
+    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
-app->minion->add_task(link => sub ($job, $game) {
-    my $task = 'link';
-    my $lock = $game;
-    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 10);
+app->minion->add_task(
+    link => sub ( $job, $game ) {
+        my $task = 'link';
+        my $lock = $game;
+        return $job->finish(
+            "Previous job $task for $game is still active. Refusing to proceed")
+          unless app->minion->lock( $lock, 10 );
 
-    $job->app->log->info("Job: $task $game begins");
+        $job->app->log->info("Job: $task $game begins");
 
-    
-      my $regist = registerGame(game => $game);
-        $job->note(register => $regist);
+        my $regist = registerGame( game => $game );
+        $job->note( register => $regist );
 
-    $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed"});
-    app->minion->unlock($lock);
-});
-
+        $job->app->log->info("$task $game completed");
+        $job->finish( { message => "$task $game completed" } );
+        app->minion->unlock($lock);
+    }
+);
 
 ## Drop #################################################
 
@@ -394,188 +397,204 @@ get '/drop/:game/:node' => sub ($c) {
     my $task = 'drop';
     my $node = $c->stash('node');
     my $game = $c->stash('game');
-      
-   # $c->minion->enqueue($task => [$game],{queue => $game}); 
-    $c->minion->enqueue($task => [$game],{attempts => 2});
-    $c->flash(message => "sending minions to $task $game on $node " );
+
+    # $c->minion->enqueue($task => [$game],{queue => $game});
+    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
-app->minion->add_task(drop => sub ($job, $game) {
-    my $task = 'drop' ;
-    my $lock = $game;
-    return $job->finish("Previous job $task for $game is still active. Refusing to proceed")
-        unless app->minion->lock($lock, 10);
+app->minion->add_task(
+    drop => sub ( $job, $game ) {
+        my $task = 'drop';
+        my $lock = $game;
+        return $job->finish(
+            "Previous job $task for $game is still active. Refusing to proceed")
+          unless app->minion->lock( $lock, 10 );
 
-    $job->app->log->info("Job: $task $game begins");
-            
-    deregisterGame( game => $game );
- 
+        $job->app->log->info("Job: $task $game begins");
 
-    $job->app->log->info("$task $game completed");
-    $job->finish({message => "$task $game completed"});
-    app->minion->unlock($lock);
-});
+        deregisterGame( game => $game );
 
-
-
-
+        $job->app->log->info("$task $game completed");
+        $job->finish( { message => "$task $game completed" } );
+        app->minion->unlock($lock);
+    }
+);
 
 ###########################################################
-##          Routing            
+##          Routing
 ###########################################################
-
-
 
 get '/' => sub ($c) {
-#
+    #
 
-#
-    my $results         =  checkIsOnline( 
-        list_by         => 'node', 
-        node            => '',
-        game            => '' );
-    
-    my $expected        =  readFromDB( 
-        table           => 'games',
-        column          => 'name',
-        field           => 'enabled',
-        value           => '1',
-        hash_ref        => 'true' );
-                           
-    $c->stash( nodes    => $results, 
-               expected => $expected
-              );
-               
-    $c->render(template => 'index' );
+    #
+    my $results = checkIsOnline(
+        list_by => 'node',
+        node    => '',
+        game    => ''
+    );
+
+    my $expected = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'enabled',
+        value    => '1',
+        hash_ref => 'true'
+    );
+
+    $c->stash(
+        nodes    => $results,
+        expected => $expected
+    );
+
+    $c->render( template => 'index' );
 };
 
+get '/log/:node/:game' => sub ($c) {
 
-get '/log/:node/:game'  => sub ($c) {
+    my $game = $c->stash('game');
+    my $node = $c->stash('node');
 
-    my $game            = $c->stash('game');
-    my $node            = $c->stash('node');
+    my $results = readLog(
+        node => $node,
+        game => $game
+    );
 
-    my $results         = readLog( node => $node,
-                               game => $game );
-
-  $c->render(template   => 'log',
-             log_data   => $results, 
-             node       => $node, 
-             game       => $game);
+    $c->render(
+        template => 'log',
+        log_data => $results,
+        node     => $node,
+        game     => $game
+    );
 };
 
+get '/info/:node/' => sub ($c) {
 
-get '/info/:node/'  => sub ($c) {
+    my $node = $c->stash('node');
 
+    my $results = infoNode( node => $node );
 
-    my $node            = $c->stash('node');
-
-    my $results         = infoNode( node => $node );
-        
     $c->stash( results => $results );
-    $c->render( template   => 'node_details', results => $results); 
+    $c->render( template => 'node_details', results => $results );
 };
 
+get '/node/:node' => sub ($c) {
 
-get '/node/:node'       => sub ($c) {
+    my $node    = $c->stash('node');
+    my $results = checkIsOnline(
+        list_by => 'node',
+        node    => $node,
+        game    => ''
+    );
 
-    my $node            = $c->stash('node');
-    my $results         = checkIsOnline( 
-        list_by         => 'node', 
-        node            => $node, 
-        game            => '' );
-             
-    my $ip              = readFromDB( 
-        table           => 'nodes',
-        column          => 'ip',
-        field           => 'name',
-        value           => $node,
-        hash_ref        => 'false' );
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $node,
+        hash_ref => 'false'
+    );
 
-    my $expected        = readFromDB( 
-        table           => 'games',
-        column          => 'name',
-        field           => 'node',
-        value           => $node,
-        hash_ref        => 'true' );
-   
-    my $jobs            = app->minion->jobs({
-        queues          => ['default'], 
-        states          => ['active', 'locked'], 
-        tasks           => ['boot', 'halt'] });
-   
-    $c->render(template => 'node', 
-        nodes           => $results, 
-        history         => $jobs, 
-        expected        => $expected);
+    my $expected = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'node',
+        value    => $node,
+        hash_ref => 'true'
+    );
+
+    my $jobs = app->minion->jobs(
+        {
+            queues => ['default'],
+            states => [ 'active', 'locked' ],
+            tasks  => [ 'boot',   'halt' ]
+        }
+    );
+
+    $c->render(
+        template => 'node',
+        nodes    => $results,
+        history  => $jobs,
+        expected => $expected
+    );
 };
 
+get '/files/:game' => sub ($c) {
 
-get '/files/:game'      => sub ($c) {
+    my $game    = $c->stash('game');
+    my @results = getFiles( game => $game );
 
-    my $game            = $c->stash('game');
-    my @results         = getFiles(game => $game);
-    
-    $c->stash(files     => @results);
-    $c->render(template => 'files' );
+    $c->stash( files => @results );
+    $c->render( template => 'files' );
 };
 
 get '/debug/:node/:game' => sub ($c) {
 
-    my $node            = $c->stash('node');
-    my $game            = $c->stash('node');
-    my ($results, $expected);
-           
-    my $is_configured   = readFromDB( 
-        table           => 'games',
-        column          => 'name',
-        field           => 'name',
-        value           => $game,
-        hash_ref        => 'false' );
+    my $node = $c->stash('node');
+    my $game = $c->stash('node');
+    my ( $results, $expected );
 
-   
-    my $jobs            = app->minion->jobs({
-        queues          => ['default'], 
-        states          => ['active', 'locked'], 
-        tasks           => ['boot', 'halt'] });
-   
-    $c->render(template => 'node', 
-        nodes           => $results, 
-        history         => $jobs, 
-        expected        => $expected);
+    my $is_configured = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'false'
+    );
+
+    my $jobs = app->minion->jobs(
+        {
+            queues => ['default'],
+            states => [ 'active', 'locked' ],
+            tasks  => [ 'boot',   'halt' ]
+        }
+    );
+
+    $c->render(
+        template => 'node',
+        nodes    => $results,
+        history  => $jobs,
+        expected => $expected
+    );
 };
 
 get '/move/:node/:game' => sub ($c) {
 
-    my $node            = $c->stash('node');
-    my $game            = $c->stash('node');
-    my ($results, $expected);
-           
-    my $is_configured   = readFromDB( 
-        table           => 'games',
-        column          => 'name',
-        field           => 'name',
-        value           => $game,
-        hash_ref        => 'false' );
+    my $node = $c->stash('node');
+    my $game = $c->stash('node');
+    my ( $results, $expected );
 
-   
-    my $jobs            = app->minion->jobs({
-        queues          => ['default'], 
-        states          => ['active', 'locked'], 
-        tasks           => ['boot', 'halt'] });
-   
-    $c->render(template => 'node', 
-        nodes           => $results, 
-        history         => $jobs, 
-        expected        => $expected);
+    my $is_configured = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'false'
+    );
+
+    my $jobs = app->minion->jobs(
+        {
+            queues => ['default'],
+            states => [ 'active', 'locked' ],
+            tasks  => [ 'boot',   'halt' ]
+        }
+    );
+
+    $c->render(
+        template => 'node',
+        nodes    => $results,
+        history  => $jobs,
+        expected => $expected
+    );
 };
 
 any '*' => sub ($c) {
-#$c->render(template => 'login') };
-    $c->flash(error => "page doesn't exist" );
+
+    #$c->render(template => 'login') };
+    $c->flash( error => "page doesn't exist" );
     $c->redirect_to("/");
 };
-
 
 ###########################################################
 ##    Functions
@@ -583,204 +602,207 @@ any '*' => sub ($c) {
 
 # update(game => 'castaway');
 sub update {
-        my %args = ( 
-        game        => '',
-        node        => '',
-        ip          => '',
-        project     => '',
-        release     => '', 
-        @_,         # argument pair list goes here
+    my %args = (
+        game    => '',
+        node    => '',
+        ip      => '',
+        project => '',
+        release => '',
+        @_,    # argument pair list goes here
     );
-    
-    my ($project, $release, $version);
 
-    my $game = $args{'game'}  or return 1;
-    
-    my $settings    =  readFromDB(
-        table       => 'games',
-        column      => 'name', 
-        field       => 'name', 
-        value       => $game,
-        hash_ref    => 'true'
-        );
-    my $ip          =  readFromDB(
-        table       => 'nodes',
-        column      => 'ip', 
-        field       => 'name', 
-        value       => $settings->{$game}{'node'},
-        hash_ref    => 'false'
-        );   
-        
+    my ( $project, $release, $version );
+
+    my $game = $args{'game'} or return 1;
+
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'node'},
+        hash_ref => 'false'
+    );
+
     if ( $settings->{$game}{isBungee} eq '1' ) {
-        $project    = 'waterfall';
+        $project = 'waterfall';
     }
     else {
-        $project    = 'paper';
+        $project = 'paper';
     }
-    
-    $release        = $settings->{$game}{release};
 
-    # Get latest release version 
-    my $project_url = "https://api.papermc.io/v2/projects/$project/versions/$release/";
-    my $ua          = Mojo::UserAgent->new();
-    my $builds      = $ua->get($project_url)->result->json;
+    $release = $settings->{$game}{release};
 
-    my $latest      = $builds->{'builds'}[-1];    
-    my $file_name   = "$project-$release-$latest.jar";
-    
-       $project_url = $project_url . '/builds/' . $latest;
-    my $meta        = $ua->get("$project_url")->result->json;
-    my $sha256      = $meta->{'downloads'}->{'application'}{'sha256'};
-    
-    
-    my $path =  $settings->{$game}{'node_path'} . '/' . $game . '/game_files/' . $file_name;
+    # Get latest release version
+    my $project_url =
+      "https://api.papermc.io/v2/projects/$project/versions/$release/";
+    my $ua     = Mojo::UserAgent->new();
+    my $builds = $ua->get($project_url)->result->json;
 
+    my $latest    = $builds->{'builds'}[-1];
+    my $file_name = "$project-$release-$latest.jar";
+
+    $project_url = $project_url . '/builds/' . $latest;
+    my $meta   = $ua->get("$project_url")->result->json;
+    my $sha256 = $meta->{'downloads'}->{'application'}{'sha256'};
+
+    my $path =
+        $settings->{$game}{'node_path'} . '/'
+      . $game
+      . '/game_files/'
+      . $file_name;
 
     # Install Latest version
-   my $user = $settings->{$game}{'node_usr'};
-   connectSSH( user => $user , ip => $ip ) ;
-   
-   $project_url = $project_url . '/downloads/' . $file_name;
-    my $cmd     = 'wget -c ' . $project_url . ' -O ' . $path;
+    my $user = $settings->{$game}{'node_usr'};
+    connectSSH( user => $user, ip => $ip );
 
-    
+    $project_url = $project_url . '/downloads/' . $file_name;
+    my $cmd = 'wget -c ' . $project_url . ' -O ' . $path;
+
     print "connect: $user.$ip   $cmd\n";
-    
-    $SSH_connections{$user.$ip}->system("$cmd");
-    
-       $cmd      = "sha256sum $path";
-    my @sha_file = split (/ /, $SSH_connections{$user.$ip}->capture("$cmd"));
-    
+
+    $SSH_connections{ $user . $ip }->system("$cmd");
+
+    $cmd = "sha256sum $path";
+    my @sha_file =
+      split( / /, $SSH_connections{ $user . $ip }->capture("$cmd") );
+
     if ( $sha_file[0] eq $sha256 ) {
         return "$file_name SHA: $sha256";
     }
     else {
         return 0;
-    }   
+    }
 }
 
-
 sub readLog {
-        my %args = ( 
-        game     => '',
-        node     => '', 
-        @_,         # argument pair list goes here
+    my %args = (
+        game => '',
+        node => '',
+        @_,    # argument pair list goes here
     );
     my $game = $args{'game'} or return 1;
     my $node = $args{'node'} or return 1;
-    
+
     my $return_string;
-    
-    my $ip      =  readFromDB( 
-        table   => 'nodes',
-        column  => 'ip',
-        field   => 'name',
-        value   => $node,
-        hash_ref => 'false' );
-                        
-    if ( ! $ip ) {
-        my $warning  = '<div class="alert alert-danger" role="alert">';
-           $warning .= '!! WARNING !! <a href="/yancy#/nodes" class="alert-link">';
-           $warning .= "$node is miss-configured in the nodes table in database";
-           $warning .= '</a></div>';
+
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $node,
+        hash_ref => 'false'
+    );
+
+    if ( !$ip ) {
+        my $warning = '<div class="alert alert-danger" role="alert">';
+        $warning .= '!! WARNING !! <a href="/yancy#/nodes" class="alert-link">';
+        $warning .= "$node is miss-configured in the nodes table in database";
+        $warning .= '</a></div>';
         return $warning;
     }
-    
-                                                 
-    my $user    = readFromDB(
-        table   => 'games',
-        column  => 'node_usr',
-        field   => 'name',
-        value   => $game, 
-        hash_ref => 'false' );
-                        
-    if ( ! $user ) {
-        my $warning  = '<div class="alert alert-danger" role="alert">';
-           $warning .= '!! WARNING !! <a href="/yancy#/games" class="alert-link">';
-           $warning .= "$game is miss-configured in the games_servers table in database";
-           $warning .= '</a></div>';
+
+    my $user = readFromDB(
+        table    => 'games',
+        column   => 'node_usr',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'false'
+    );
+
+    if ( !$user ) {
+        my $warning = '<div class="alert alert-danger" role="alert">';
+        $warning .= '!! WARNING !! <a href="/yancy#/games" class="alert-link">';
+        $warning .=
+          "$game is miss-configured in the games_servers table in database";
+        $warning .= '</a></div>';
         return $warning;
     }
-    
-    
-    connectSSH( user => $user, ip => $ip ) ;
-    
-    my $cmd     = "[ -f ~/$game/game_files/screenlog.0 ] ";
-       $cmd    .= "&& tail -5000 ~/$game/game_files/screenlog.0 | tac | ";
-       $cmd    .= "sed '/Starting minecraft\\\|Enabled Waterfall/q' | tac";
-    
-    my $log     = $SSH_connections{$user.$ip}->capture("$cmd");
-       $log     =~ s/ /\&nbsp;/g;
-    my @lines   = split(/\n/, $log);
-    
-    foreach ( @lines ) {
-        $return_string .= '<div style="width: 80rem;"><small>' . $_ . '</small></div>';
+
+    connectSSH( user => $user, ip => $ip );
+
+    my $cmd = "[ -f ~/$game/game_files/screenlog.0 ] ";
+    $cmd .= "&& tail -5000 ~/$game/game_files/screenlog.0 | tac | ";
+    $cmd .= "sed '/Starting minecraft\\\|Enabled Waterfall/q' | tac";
+
+    my $log = $SSH_connections{ $user . $ip }->capture("$cmd");
+    $log =~ s/ /\&nbsp;/g;
+    my @lines = split( /\n/, $log );
+
+    foreach (@lines) {
+        $return_string .=
+          '<div style="width: 80rem;"><small>' . $_ . '</small></div>';
     }
-    
+
     $return_string =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;
-    $return_string =~ s/\r//g;s/\007//g;
+    $return_string =~ s/\r//g;
+    s/\007//g;
     $return_string =~ s/[^[:print:]]+//g;
 
     return $return_string;
 }
 
-
 sub readFromDB {
 
     refreshDB();
-    
+
     my %args = (
-        table       => '', 
-        column      => '', 
-        field       => '',
-        value       => '',
-        hash_ref    => 'true',         
-    @_);
-            
+        table    => '',
+        column   => '',
+        field    => '',
+        value    => '',
+        hash_ref => 'true',
+        @_
+    );
+
     return 1 if not $args{'table'};
     return 1 if not $args{'column'};
-    
+
     my $table  = $args{'table'};
     my $column = $args{'column'};
     my $field  = $args{'field'};
     my $value  = $args{'value'};
-    
-    
-    my ($ref, $ref_name, $ref_value);
+
+    my ( $ref, $ref_name, $ref_value );
     my $result = {};
     my %result = %$result;
-    
+
     $log->debug("sub readFromDB");
-    
+
     my $select = '*';
-       $select = $column if ( $args{'hash_ref'} eq 'false' );
-    
-    my $query = "SELECT $select FROM $table";   
+    $select = $column if ( $args{'hash_ref'} eq 'false' );
+
+    my $query = "SELECT $select FROM $table";
     $log->debug("Reading DB table:");
-    
+
     if ( $field ne '' && $value ne '' ) {
         $query .= " WHERE $field = '$value'";
     }
-    
+
     $query .= ";";
     $log->debug("$query");
-    
+
     $sth = $dbh->prepare($query);
     $sth->execute();
 
-
     while ( $ref = $sth->fetchrow_hashref() ) {
-    my $index_name = $ref->{$column};
- 
+        my $index_name = $ref->{$column};
+
         foreach ( @{ $sth->{NAME} } ) {
-            $ref_name  = $_;
-            $ref_value = $ref->{$ref_name};
-                $result{$index_name}{$ref_name} = $ref_value;
+            $ref_name                       = $_;
+            $ref_value                      = $ref->{$ref_name};
+            $result{$index_name}{$ref_name} = $ref_value;
         }
     }
-    
+
     $sth->finish();
-    
+
     if ( $args{'hash_ref'} eq 'true' ) {
         return \%result;
     }
@@ -789,34 +811,33 @@ sub readFromDB {
     }
 }
 
-
 # checkIsOnline();
 sub checkIsOnline {
 
-    my %args = ( 
-        game        => '',
-        node        => '',
-        pid         => '',
-        user        => 'minecraft',
-        list_by     => 'game',
-        @_,         # argument pair list goes here
+    my %args = (
+        game    => '',
+        node    => '',
+        pid     => '',
+        user    => 'minecraft',
+        list_by => 'game',
+        @_,    # argument pair list goes here
     );
 
-    my $enabledNodes   = readFromDB( 
-        table       => 'nodes',
-        column      => 'name', 
-        field       => 'enabled', 
-        value       => '1',
-        hash_ref    => 'true'
-                  );
+    my $enabledNodes = readFromDB(
+        table    => 'nodes',
+        column   => 'name',
+        field    => 'enabled',
+        value    => '1',
+        hash_ref => 'true'
+    );
 
-    my $enabledGames   = readFromDB( 
-        table       => 'games',
-        column      => 'name', 
-        field       => 'enabled', 
-        value       => '1',
-        hash_ref    => 'true' );
-        
+    my $enabledGames = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'enabled',
+        value    => '1',
+        hash_ref => 'true'
+    );
 
     my %enabledNodes = %$enabledNodes;
     my @live_nodes;
@@ -828,162 +849,167 @@ sub checkIsOnline {
     my %return_hash = %$return_hash;
     my $list_by     = $args{'list_by'};
     my $user        = $args{'user'};
-        
+
     if ( $args{'node'} ) {
         @nodes_to_check = $args{'node'};
-        $log->debug( "Using specified node" );
+        $log->debug("Using specified node");
     }
     else {
-        @nodes_to_check = (sort keys %{$enabledNodes});
-        $log->debug( "Using nodes from DB" );
+        @nodes_to_check = ( sort keys %{$enabledNodes} );
+        $log->debug("Using nodes from DB");
     }
 
-        $log->debug( "Pinging: \[@nodes_to_check\]" );
+    $log->debug("Pinging: \[@nodes_to_check\]");
 
-   
-   foreach my $this_node (@nodes_to_check) {
-        #my %this_node = %$this_node;        
-        $log->debug( "this node: $this_node");
+    foreach my $this_node (@nodes_to_check) {
+
+        #my %this_node = %$this_node;
+        $log->debug("this node: $this_node");
         my $p = Net::Ping->new;
-        if ($p->ping($enabledNodes{$this_node}{'ip'} , 0.01)) {
-            $log->debug( "[OK] $this_node is online" ); 
-            push @live_nodes, $this_node ;
+        if ( $p->ping( $enabledNodes{$this_node}{'ip'}, 0.01 ) ) {
+            $log->debug("[OK] $this_node is online");
+            push @live_nodes, $this_node;
         }
         else {
-            $log->debug( "[!!] $this_node is offline" );
-            push @dead_nodes, $this_node ; 
-        } 
+            $log->debug("[!!] $this_node is offline");
+            push @dead_nodes, $this_node;
+        }
     }
-           $log->debug( "Checking: \[@live_nodes\]" );
+    $log->debug("Checking: \[@live_nodes\]");
 
-    
-    
     foreach my $this_node (@live_nodes) {
         $log->debug("Query $this_node for games...");
-        
+
         my $ip = $enabledNodes{$this_node}{'ip'};
-        
 
         if ( connectSSH( user => $user, ip => $ip ) ) {
-            $return_hash{$this_node} = { };
+            $return_hash{$this_node} = {};
             next;
         }
-        
+
         $return_hash{$this_node} = {};
-         
+
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
-        my $screen_list = $SSH_connections{$user.$ip}->capture("@cmd");
-#        $log->debug("$screen_list");
+        my $screen_list = $SSH_connections{ $user . $ip }->capture("@cmd");
+
+        #        $log->debug("$screen_list");
 
         my @screen_list = split( '\n', $screen_list );
-        
-        foreach my $this_game ( @screen_list ) {
-            my @column = split( / +/ , $this_game );
-            
+
+        foreach my $this_game (@screen_list) {
+            my @column = split( / +/, $this_game );
+
             if ( $column[2] eq '1' ) {
-                # SCREEN has ppid of 1. Load the PID and game 
-                $temp_hash{$column[1].$this_node}{'node'}   = $this_node;
-                $temp_hash{$column[1].$this_node}{'user'}   = $column[0];
-                $temp_hash{$column[1].$this_node}{'game'}   = $column[12];
+
+                # SCREEN has ppid of 1. Load the PID and game
+                $temp_hash{ $column[1] . $this_node }{'node'} = $this_node;
+                $temp_hash{ $column[1] . $this_node }{'user'} = $column[0];
+                $temp_hash{ $column[1] . $this_node }{'game'} = $column[12];
             }
-            
+
             if ( $column[2] ne '1' ) {
+
                 # Match java child ppid to SCREEN pid to reference correct hash
-                $temp_hash{$column[2].$this_node}{'pid'}    = $column[1];
-                $temp_hash{$column[2].$this_node}{'ppid'}   = $column[2];
-                $temp_hash{$column[2].$this_node}{'pcpu'}   = $column[3];
-                $temp_hash{$column[2].$this_node}{'pmem'}   = $column[4];
-                $temp_hash{$column[2].$this_node}{'vsz'}    = $column[5];
-                $temp_hash{$column[2].$this_node}{'rss'}    = $column[6];
+                $temp_hash{ $column[2] . $this_node }{'pid'}  = $column[1];
+                $temp_hash{ $column[2] . $this_node }{'ppid'} = $column[2];
+                $temp_hash{ $column[2] . $this_node }{'pcpu'} = $column[3];
+                $temp_hash{ $column[2] . $this_node }{'pmem'} = $column[4];
+                $temp_hash{ $column[2] . $this_node }{'vsz'}  = $column[5];
+                $temp_hash{ $column[2] . $this_node }{'rss'}  = $column[6];
             }
-        }             
+        }
     }
-    
+
     ## Remap temp_hash into return_hash based on $list_by arg
     #  Using list_by|game pair to avoind duplicates
     foreach my $result ( keys %temp_hash ) {
-      my $list_by = $temp_hash{$result}{ $args{'list_by'} };
-      
-      
-      my $game    = $temp_hash{$result}{'game'};
-      
-        $log->warn("[!!] $game is running multiple times!") if ( $return_hash{$list_by}{$game} );
-      
-        $return_hash{$list_by}{$game}{'node'}  = $temp_hash{$result}{'node'};
-        $return_hash{$list_by}{$game}{'user'}  = $temp_hash{$result}{'user'};
-        $return_hash{$list_by}{$game}{'game'}  = $temp_hash{$result}{'game'};
-        $return_hash{$list_by}{$game}{'pid'}   = $temp_hash{$result}{'pid'};
-        $return_hash{$list_by}{$game}{'ppid'}  = $temp_hash{$result}{'ppid'};
-        $return_hash{$list_by}{$game}{'pcpu'}  = $temp_hash{$result}{'pcpu'};
-        $return_hash{$list_by}{$game}{'pmem'}  = $temp_hash{$result}{'pmem'};
-        $return_hash{$list_by}{$game}{'vsz'}   = $temp_hash{$result}{'vsz'};
-        $return_hash{$list_by}{$game}{'rss'}   = $temp_hash{$result}{'rss'};
+        my $list_by = $temp_hash{$result}{ $args{'list_by'} };
+
+        my $game = $temp_hash{$result}{'game'};
+
+        $log->warn("[!!] $game is running multiple times!")
+          if ( $return_hash{$list_by}{$game} );
+
+        $return_hash{$list_by}{$game}{'node'} = $temp_hash{$result}{'node'};
+        $return_hash{$list_by}{$game}{'user'} = $temp_hash{$result}{'user'};
+        $return_hash{$list_by}{$game}{'game'} = $temp_hash{$result}{'game'};
+        $return_hash{$list_by}{$game}{'pid'}  = $temp_hash{$result}{'pid'};
+        $return_hash{$list_by}{$game}{'ppid'} = $temp_hash{$result}{'ppid'};
+        $return_hash{$list_by}{$game}{'pcpu'} = $temp_hash{$result}{'pcpu'};
+        $return_hash{$list_by}{$game}{'pmem'} = $temp_hash{$result}{'pmem'};
+        $return_hash{$list_by}{$game}{'vsz'}  = $temp_hash{$result}{'vsz'};
+        $return_hash{$list_by}{$game}{'rss'}  = $temp_hash{$result}{'rss'};
     }
-    
+
     ## Load the offline nodes
     foreach my $offline (@dead_nodes) {
         $return_hash{$offline}{'offline'}{'offline'} = 'true';
     }
 
     if ( $args{game} ) {
-        
+
         if ( $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} ) {
-            $log->debug( "Found $args{'game'} on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}" );
-            return "$return_hash{ $args{'game'} }{ $args{'game'} }{'node'}" 
+            $log->debug(
+"Found $args{'game'} on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}"
+            );
+            return "$return_hash{ $args{'game'} }{ $args{'game'} }{'node'}";
         }
-        
+
         else {
-            return 0
+            return 0;
         }
     }
-    
-        return \%return_hash;  
-}
 
+    return \%return_hash;
+}
 
 sub registerGame {
 
-    my %args = ( 
-        game => '', 
-        @_,         # argument pair list goes here
+    my %args = (
+        game => '',
+        @_,    # argument pair list goes here
     );
 
     my $game = $args{'game'};
-    my ($islobby, $isrestricted, $cmd);
+    my ( $islobby, $isrestricted, $cmd );
 
-    my $settings    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'name',
-        value       => $game, 
-        hash_ref    => 'true' );
-        
-    my $gateway     = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'isBungee',
-        value       => '1', 
-        hash_ref    => 'false' );
-        
-    my $node        = readFromDB(
-        table       => 'games',
-        column      => 'node',
-        field       => 'isBungee',
-        value       => '1', 
-        hash_ref    => 'false' );
-        
-    my $ip          = readFromDB(
-        table       => 'nodes',
-        column      => 'ip',
-        field       => 'name',
-        value       => $settings->{$game}{'node'}, 
-        hash_ref    => 'false' );
-                    
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+
+    my $gateway = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'isBungee',
+        value    => '1',
+        hash_ref => 'false'
+    );
+
+    my $node = readFromDB(
+        table    => 'games',
+        column   => 'node',
+        field    => 'isBungee',
+        value    => '1',
+        hash_ref => 'false'
+    );
+
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'node'},
+        hash_ref => 'false'
+    );
+
     # Exit if this game is a bungee server
     if ( $settings->{$game}{'isBungee'} eq '1' ) {
         return "This is a bungee instance, exiting";
     }
-    
+
     $log->debug("Registering $game on the network with $gateway");
 
     $cmd = "servermanager delete " . $game . "^M";
@@ -992,13 +1018,13 @@ sub registerGame {
     sleep(0.5);
 
     if ( $settings->{$game}{'isLobby'} eq '1' ) {
-        $islobby      = 'true';
+        $islobby = 'true';
     }
     else {
-         $islobby      = 'false';
-    }   
-    
-    if ( $settings->{$game}{'isRestricted'}   eq '1' ) {
+        $islobby = 'false';
+    }
+
+    if ( $settings->{$game}{'isRestricted'} eq '1' ) {
         $isrestricted = 'true';
     }
     else {
@@ -1013,41 +1039,42 @@ sub registerGame {
 
     sendCommand( command => $cmd, game => $gateway, node => $node );
     sleep(0.5);
-    
+
     return "$game linked to $gateway network - $cmd";
 }
 
-
 sub deregisterGame {
-    my %args = ( 
-        game => '', 
-        @_,         # argument pair list goes here
+    my %args = (
+        game => '',
+        @_,    # argument pair list goes here
     );
 
     my $game = $args{'game'};
-    my ($islobby, $isrestricted, $cmd);
+    my ( $islobby, $isrestricted, $cmd );
 
-    my $settings    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'name',
-        value       => $game, 
-        hash_ref    => 'true' );
-        
-    my $gateway      = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'isBungee',
-        value       => '1', 
-        hash_ref    => 'false' );
-        
-    my $node        = readFromDB(
-        table       => 'games',
-        column      => 'node',
-        field       => 'isBungee',
-        value       => '1', 
-        hash_ref    => 'false' );
-                    
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+
+    my $gateway = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'isBungee',
+        value    => '1',
+        hash_ref => 'false'
+    );
+
+    my $node = readFromDB(
+        table    => 'games',
+        column   => 'node',
+        field    => 'isBungee',
+        value    => '1',
+        hash_ref => 'false'
+    );
 
     $log->debug("Registering $game on the network with $gateway");
 
@@ -1056,141 +1083,138 @@ sub deregisterGame {
     sendCommand( command => $cmd, game => $gateway, node => $node );
 }
 
-# getFiles(game => 'benchmark'); 
+# getFiles(game => 'benchmark');
 sub getFiles {
-        my %args = ( 
-        user    => '', 
-        ip      => '',
-        game    => '',
-        @_,         # argument pair list goes here
+    my %args = (
+        user => '',
+        ip   => '',
+        game => '',
+        @_,    # argument pair list goes here
     );
-    
+
     my $game = $args{'game'};
-    
-    my $settings    = readFromDB( 
-        table       => 'games',
-        column      => 'name',
-        field       => 'name',
-        value       => $game,
-        hash_ref    => 'true' );
-        
-    my %settings  = %$settings; 
-    
-    my $snode     = $settings->{$game}{'store'};
-    my $suser     = $settings->{$game}{'store_usr'};
-    my $spath     = $settings->{$game}{'store_path'};               
-    
-    my $sip      = readFromDB( 
+
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+
+    my %settings = %$settings;
+
+    my $snode = $settings->{$game}{'store'};
+    my $suser = $settings->{$game}{'store_usr'};
+    my $spath = $settings->{$game}{'store_path'};
+
+    my $sip = readFromDB(
         table    => 'nodes',
         column   => 'ip',
         field    => 'name',
         value    => $snode,
-        hash_ref => 'false' );
-                                
-                                
+        hash_ref => 'false'
+    );
 
     my $results = {};
     my %results = %$results;
-    
 
     return 1 if connectSSH( user => $suser, ip => $sip );
 
-   # %SSH_connections{} is declared globally
-    my    $ssh_connection = $SSH_connections{$suser.$sip};
-    my    @files          = $ssh_connection->capture("cd $spath; find $game -type f ");
+    # %SSH_connections{} is declared globally
+    my $ssh_connection = $SSH_connections{ $suser . $sip };
+    my @files = $ssh_connection->capture("cd $spath; find $game -type f ");
     chomp(@files);
 
-#    for (@files) {
-#        print "$_\n";
-#    }
+    #    for (@files) {
+    #        print "$_\n";
+    #    }
     return \@files;
 }
-
 
 # s command => 'say hello', game => 'benchmark', node => '' );
 
 sub sendCommand {
-    my %args    = ( 
-        game    => '', 
+    my %args = (
+        game    => '',
         command => '',
         node    => '',
         ip      => '',
-                @_,);
-    
-    my $game        = $args{'game'};
-    my $command     = $args{'command'};
-    my $node        = $args{'node'};
-    
-    my $settings    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'name',
-        value       => $game,
-        hash_ref    => 'true' );
+        @_,
+    );
+
+    my $game    = $args{'game'};
+    my $command = $args{'command'};
+    my $node    = $args{'node'};
+
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
 
     # Order of prioroty for node:- commandline, then livegames then DB
-    $node = checkIsOnline( list_by => 'node', node => '', game => $game ) unless $node;
+    $node = checkIsOnline( list_by => 'node', node => '', game => $game )
+      unless $node;
     $node = $settings->{$game}{'node'} unless $node;
-    
-    my $ip          = readFromDB(
-        table       => 'nodes',
-        column      => 'ip',
-        field       => 'name',
-        value       => $node,
-        hash_ref    => 'false' );        
 
-    
-    my ($results, @results);
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $node,
+        hash_ref => 'false'
+    );
+
+    my ( $results, @results );
     my $user = $settings->{$game}{'node_usr'};
-   
-     $log->debug("Sending command: $command to $game on $ip");
 
-    connectSSH( user => $user, ip => $ip ) ; #or die "Error establishing SSH" ;
+    $log->debug("Sending command: $command to $game on $ip");
 
+    connectSSH( user => $user, ip => $ip );   #or die "Error establishing SSH" ;
 
-   # %SSH_connections{} is declared globally
-    my $ssh_connection = $SSH_connections{$user.$ip};
-       #$log->debug("SSH: $ssh_connection $user\.$ip");
-    
-       $ssh_connection->system("screen -p 0 -S $game -X clear");
-       $ssh_connection->system("screen -p 0 -S $game -X hardcopy");
-       $ssh_connection->system("screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
-       
-     $log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \"" 
+    # %SSH_connections{} is declared globally
+    my $ssh_connection = $SSH_connections{ $user . $ip };
+
+    $ssh_connection->system("screen -p 0 -S $game -X clear");
+    $ssh_connection->system("screen -p 0 -S $game -X hardcopy");
+    $ssh_connection->system(
+        "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
+
+    $log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
           . $command
           . "\"^M'" );
-          
-     Time::HiRes::sleep( 0.05 );
-    
+
+    Time::HiRes::sleep(0.05);
+
     $ssh_connection->system("screen -p 0 -S $game -X hardcopy");
     $results = $ssh_connection->capture("cat $game/game_files/hardcopy.0");
 
-    @results =  split( '\n', $results );
+    @results = split( '\n', $results );
     $results = $results if /\S/;
     $results = $results if s/[^[:ascii:]]//g, $results;
     foreach (@results) {
         $log->debug("$game SCREEN: $_");
     }
-    
+
     return $results;
 }
 
-
 sub refreshDB {
-    ## TODO: Handle any errors correctly
-    
     unless ( $dbh->ping ) {
         $log->info("No connection to DB...reconnecting");
         $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
             "$db_user", "$db_pass", { 'RaiseError' => 1 } );
     }
-    
+
     return 0;
 }
 
 sub read_config_file {
     my ($configfile) = $_[0];
-    
+
     my $CONFIG;
     open( $CONFIG, '<', $configfile ) or croak "[!!] $configfile doesn't exist";
 
@@ -1212,71 +1236,70 @@ sub read_config_file {
     $db_name = $User_Preferences{'db_name'};
 }
 
-
 sub connectSSH {
     ## Takes username and ip, and confirms/creates a SSH connection
     ## Stores the connection in the global %SSH_connections{}
-    my %args = ( 
-        user    => '', 
-        ip      => '',
-        @_,         # argument pair list goes here
+    my %args = (
+        user => '',
+        ip   => '',
+        @_,    # argument pair list goes here
     );
-    
+
     $args{'user'} || return "Aborting SSH: must specify username";
     $args{'ip'}   || return "Aborting SSH: must specify ip";
-    
-    
-    
-    if ($SSH_connections{$args{'user'}.$args{'ip'}}) {
-        $SSH_connections{$args{'user'}.$args{'ip'}}->check_master;
+
+    if ( $SSH_connections{ $args{'user'} . $args{'ip'} } ) {
+        $SSH_connections{ $args{'user'} . $args{'ip'} }->check_master;
         $log->debug("SSH $args{'user'}\@$args{'ip'} is healthy");
         return 0;
     }
-    
+
     else {
         $log->debug("New SSH: $args{'user'}\@$args{'ip'}");
-        
+
         my $this_connection;
         my $connection = $args{'user'} . "@" . $args{'ip'};
-        
-        $this_connection = Net::OpenSSH->new($connection, master_opts => ['-o PasswordAuthentication=no','-o StrictHostKeyChecking=no']);
-         
-         
+
+        $this_connection = Net::OpenSSH->new( $connection,
+            master_opts =>
+              [ '-o PasswordAuthentication=no', '-o StrictHostKeyChecking=no' ]
+        );
+
         if ( $this_connection->error ) {
-            print "[!!] Error connecting to $args{'ip'}:" ;
+            print "[!!] Error connecting to $args{'ip'}:";
             print $this_connection->error . "\n";
-           # print Dumper $this_connection;
-            
+
+            # print Dumper $this_connection;
+
             return 1;
         }
-        print "[OK] Connected to: $args{'user'}.$args{'ip'}" ;
-        $SSH_connections{$args{'user'}.$args{'ip'}} = $this_connection;
-        
+        print "[OK] Connected to: $args{'user'}.$args{'ip'}";
+        $SSH_connections{ $args{'user'} . $args{'ip'} } = $this_connection;
+
         return 0;
     }
 }
 
-
 # haltGame(game => 'benchmark');
 sub haltGame {
-    my %args = ( 
+    my %args = (
         game => '',
-        node => '', 
-        @_,         # argument pair list goes here
+        node => '',
+        @_,    # argument pair list goes here
     );
-    
+
     my $game = $args{'game'};
     my $node = $args{'node'};
-    
+
     $log->info("Halting: $game");
 
-#    sendCommand( "servermanager kick $game^Mco purge t:90d", $gatewayName );
-#    deregisterGame( game => $game );
+   #    sendCommand( "servermanager kick $game^Mco purge t:90d", $gatewayName );
+   #    deregisterGame( game => $game );
 
-#    sleep(2);
+    #    sleep(2);
 
-#    storeGame( game => $game );
- 
+    #    storeGame( game => $game );
+
     sendCommand( command => "stop^Mend", game => $game, node => $node );
 
     sleep(30);
@@ -1332,114 +1355,127 @@ sub configLogger {
 
 # storeGame('benchmark');
 sub storeGame {
-    my %args = ( 
-        game   => '', 
-        @_,         # argument pair list goes here
+    my %args = (
+        game => '',
+        @_,    # argument pair list goes here
     );
-    
-    my $game = $args{'game'};
-      
-    my ($user, $suser, $cp_to, $cp_from);
-    
-    my $error  = "Aborting task as $game is offline!! ";
-       $error .= "It's potentially catastrophic to overwrite ";
-       $error .= "the primary store with data we cannot verify. ";
-       $error .= "Please ensure the game is running to prove viabitiy ";
-       $error .= "before attempting a sync to the primary data store location"; 
-       
-       return $error unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
-    
-    my $settings    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'name',
-        value       => $game,
-        hash_ref    => 'true' );
-        
-    my %settings = %$settings;                        
-    
-    my $ip        = readFromDB( table => 'nodes',
-                               column => 'ip',
-                                field => 'name',
-                                value => $settings->{$game}{'node'},
-                             hash_ref => 'false' );
-    
-    my $sip       = readFromDB( table => 'nodes',
-                               column => 'ip',
-                                field => 'name',
-                                value => $settings->{$game}{'store'},
-                             hash_ref => 'false' );
 
+    my $game = $args{'game'};
+
+    my ( $user, $suser, $cp_to, $cp_from );
+
+    my $error = "Aborting task as $game is offline!! ";
+    $error .= "It's potentially catastrophic to overwrite ";
+    $error .= "the primary store with data we cannot verify. ";
+    $error .= "Please ensure the game is running to prove viabitiy ";
+    $error .= "before attempting a sync to the primary data store location";
+
+    return $error
+      unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+
+    my %settings = %$settings;
+
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'node'},
+        hash_ref => 'false'
+    );
+
+    my $sip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'store'},
+        hash_ref => 'false'
+    );
 
     $log->info("deployGamerserver: $game");
 
-    $user        = $settings{$game}{"node_usr"};
-    $suser       = $settings{$game}{"store_usr"};
+    $user  = $settings{$game}{"node_usr"};
+    $suser = $settings{$game}{"store_usr"};
 
-    $cp_from    = $user . "@" . $ip . ":";
-    $cp_from   .= $settings{$game}{"node_path"} . "/". $game;
+    $cp_from = $user . "@" . $ip . ":";
+    $cp_from .= $settings{$game}{"node_path"} . "/" . $game;
 
-    $cp_to      = $settings{$game}{"store_path"} . "/" ;
+    $cp_to = $settings{$game}{"store_path"} . "/";
 
     $log->debug(" $cp_from $cp_to ");
 
     my $output = connectSSH( user => $suser, ip => $sip ) . "\n";
 
-    $log->debug("rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to");
-    $output .= $SSH_connections{$suser.$sip}->capture("rsync -auv --delete --exclude='pugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to");
+    $log->debug(
+"rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to"
+    );
+    $output .=
+      $SSH_connections{ $suser . $sip }->capture(
+"rsync -auv --delete --exclude='pugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
+      );
 
     return $output;
 }
 
 # bootGame('benchmark');
 sub bootGame {
-    my %args       = ( 
+    my %args = (
         game       => '',
         server_bin => '',
-        @_,         # argument pair list goes here
+        @_,    # argument pair list goes here
     );
-    
+
     my $game = $args{'game'};
-    
-    my ($user, $suser, $cp_to, $cp_from);
-    
-    return "$game is already online" if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
-    
-    my $settings    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'name',
-        value       => $game,
-        hash_ref    => 'true' );
-        
-    my %settings    = %$settings;                        
-    
-    my $ip          = readFromDB( 
-        table       => 'nodes',
-        column      => 'ip',
-        field       => 'name',
-        value       => $settings->{$game}{'node'},
-        hash_ref    => 'false' );
-                                 
+
+    my ( $user, $suser, $cp_to, $cp_from );
+
+    return "$game is already online"
+      if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+
+    my %settings = %$settings;
+
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'node'},
+        hash_ref => 'false'
+    );
+
     my $invocation;
-       $invocation  = "cd " . $settings->{$game}{'node_path'};
-       $invocation .= "/" . $game . "/game_files";
-       $invocation .= " && screen -h 1024 -L -dmS " . $game;
-       $invocation .= " " . $settings->{$game}{'java_bin'};
-       $invocation .= " -Xms" . $settings->{$game}{'mem_min'};
-       $invocation .= " -Xmx" . $settings->{$game}{'mem_max'};
-       $invocation .= " " . $settings->{$game}{'java_flags'};
-       $invocation .= " -jar " . $args{'server_bin'};
-       $invocation .= " --forceUpgrade";
-       $invocation .= " --port " . $settings{$game}{'port'};
-       $invocation .= " nogui server";
-       $invocation =~ s/\n+/ /g;
+    $invocation = "cd " . $settings->{$game}{'node_path'};
+    $invocation .= "/" . $game . "/game_files";
+    $invocation .= " && screen -h 1024 -L -dmS " . $game;
+    $invocation .= " " . $settings->{$game}{'java_bin'};
+    $invocation .= " -Xms" . $settings->{$game}{'mem_min'};
+    $invocation .= " -Xmx" . $settings->{$game}{'mem_max'};
+    $invocation .= " " . $settings->{$game}{'java_flags'};
+    $invocation .= " -jar " . $args{'server_bin'};
+    $invocation .= " --forceUpgrade";
+    $invocation .= " --port " . $settings{$game}{'port'};
+    $invocation .= " nogui server";
+    $invocation =~ s/\n+/ /g;
 
     $log->trace("$invocation");
     $user = $settings->{$game}{'node_usr'};
-    
+
     my $output = connectSSH( user => $user, ip => $ip );
-    $SSH_connections{$user.$ip}->system("$invocation");
+    $SSH_connections{ $user . $ip }->system("$invocation");
 
     sleep(10);
 
@@ -1455,56 +1491,62 @@ sub bootGame {
 
 #deployGame('benchmark');
 sub deployGame {
-    my %args = ( 
-        game   => '',  
-        @_,         # argument pair list goes here
+    my %args = (
+        game => '',
+        @_,    # argument pair list goes here
     );
-    
+
     my $game = $args{'game'};
-    
-    my ($user, $suser, $cp_to, $cp_from);
-    
-    my $error  = "Aborting task as $game is currently online. ";
-       $error .= "It would be unsafe to deloy overtop of a running game. "; 
-    
-    return $error if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
-    
-    my  $settings = readFromDB( table => 'games',
-                               column => 'name',
-                                field => 'name',
-                                value => $game,
-                             hash_ref => 'true' );
-    my %settings = %$settings;                        
-    
-    my $ip        = readFromDB( table => 'nodes',
-                               column => 'ip',
-                                field => 'name',
-                                value => $settings->{$game}{'node'},
-                             hash_ref => 'false' );
-    
-    my $sip       = readFromDB( table => 'nodes',
-                               column => 'ip',
-                                field => 'name',
-                                value => $settings->{$game}{'store'},
-                             hash_ref => 'false' );
-                             
-    
+
+    my ( $user, $suser, $cp_to, $cp_from );
+
+    my $error = "Aborting task as $game is currently online. ";
+    $error .= "It would be unsafe to deloy overtop of a running game. ";
+
+    return $error
+      if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+    my %settings = %$settings;
+
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'node'},
+        hash_ref => 'false'
+    );
+
+    my $sip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'store'},
+        hash_ref => 'false'
+    );
+
     $log->info("deployGamerserver: $game");
 
-    $user        = $settings->{$game}{'node_usr'};
-    $suser       = $settings->{$game}{'store_usr'};
+    $user  = $settings->{$game}{'node_usr'};
+    $suser = $settings->{$game}{'store_usr'};
 
-    $cp_to      = $user . "@" . $ip . ":";
-    $cp_to     .= $settings->{$game}{'node_path'} . "/";
+    $cp_to = $user . "@" . $ip . ":";
+    $cp_to .= $settings->{$game}{'node_path'} . "/";
 
-    $cp_from    = $settings->{$game}{'store_path'} . "/" . $game;
+    $cp_from = $settings->{$game}{'store_path'} . "/" . $game;
 
-
-    my $rsync_cmd = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
+    my $rsync_cmd  = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no ";
+       $rsync_cmd .= "-o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
     $log->debug(" $rsync_cmd ");
 
-     unless ( connectSSH( user => $suser, ip => $sip ) ) {
-        my $output = $SSH_connections{$suser.$sip}->capture("$rsync_cmd");
+    unless ( connectSSH( user => $suser, ip => $sip ) ) {
+        my $output = $SSH_connections{ $suser . $sip }->capture("$rsync_cmd");
         return $output;
     }
     else {
@@ -1514,57 +1556,59 @@ sub deployGame {
 
 #infoNode( node => 'node5' );
 sub infoNode {
-    my %args = ( 
+    my %args = (
         node => '',
         user => 'minecraft',
-        @_,         # argument pair list goes here
+        @_,    # argument pair list goes here
     );
 
     my $output = {};
     my %output = %$output;
-    
+
     my $node = $args{'node'};
     my $user = $args{'user'};
-    my ($islobby, $isrestricted, $cmd);
+    my ( $islobby, $isrestricted, $cmd );
 
-    my $ip          = readFromDB(
-        table       => 'nodes',
-        column      => 'ip',
-        field       => 'name',
-        value       => $node, 
-        hash_ref    => 'false' );
-    my $game_ports  = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'node',
-        value       => $node, 
-        hash_ref    => 'true' );
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $node,
+        hash_ref => 'false'
+    );
+    my $game_ports = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'node',
+        value    => $node,
+        hash_ref => 'true'
+    );
 
+    my @cpu_cmd = q(mpstat -P ALL 2>&1);
+    my @pid_cmd = q+pidstat --human -U $(whoami)+;
+    my @mem_cmd = q(free -wh;echo; vmstat -wSMa 2>&1; numastat -m -n);
+    my $net_cmd = q~vnstat -hg -i $(vnstat | sed -n 's/^[ \t]*\([^:]*\):$/\1/p' | tr '\n' '+' | sed 's/+$//') 2>&1; ~;
+      $net_cmd .= q~vnstat -d -i $(vnstat | sed -n 's/^[ \t]*\([^:]*\):$/\1/p' | tr '\n' '+' | sed 's/+$//') 2>&1;~;
+      $net_cmd .= q~echo;ip -s link~;
+    my $con_cmd = q%ss -Hturp | awk -F'[ ")(:,]*' '$7 !~ /'"$(dig +short -x %;
+      $con_cmd .= q%$(hostname -I | awk '{print $1}') | awk -F. '{print $2}' %;
+      $con_cmd .= q+)"'|^[ \t]*$|localhost/ {printf "%s %-5s %-5s %-7s <=> %7s %40s \n"  ,$10,$3,$4,$6,$8,$7}' | sort -n -k4 -n -k3;echo;+;
+    my $io_cmd  = 'iostat -h 2>&1';
+    my $df_cmd  = 'df -h $(pwd) 2>&1; printf "\n\n"; df -hT --total';
+    my $neo_cmd = 'neofetch --stdout 2>&1';
+    my $du_cmd  = 'echo $(pwd); du -shc * 2>&1 | sort -h';
 
-    my @cpu_cmd     = q(mpstat -P ALL 2>&1);
-    my @pid_cmd     = q+pidstat --human -U $(whoami)+;
-    my @mem_cmd     = q(free -wh;echo; vmstat -wSMa 2>&1; numastat -m -n);
-    my $net_cmd     = q~vnstat -hg -i $(vnstat | sed -n 's/^[ \t]*\([^:]*\):$/\1/p' | tr '\n' '+' | sed 's/+$//') 2>&1; ~;
-       $net_cmd    .= q~vnstat -d -i $(vnstat | sed -n 's/^[ \t]*\([^:]*\):$/\1/p' | tr '\n' '+' | sed 's/+$//') 2>&1;~;
-       $net_cmd    .= q~echo;ip -s link~;
-    my $con_cmd     = q%ss -Hturp | awk -F'[ ")(:,]*' '$7 !~ /'"$(dig +short -x %;
-       $con_cmd    .= q%$(hostname -I | awk '{print $1}') | awk -F. '{print $2}' %;
-       $con_cmd    .= q+)"'|^[ \t]*$|localhost/ {printf "%s %-5s %-5s %-7s <=> %7s %40s \n"  ,$10,$3,$4,$6,$8,$7}' | sort -n -k4 -n -k3;echo;+;
-    my $io_cmd      = 'iostat -h 2>&1';
-    my $df_cmd      = 'df -h $(pwd) 2>&1; printf "\n\n"; df -hT --total';
-    my $neo_cmd     = 'neofetch --stdout 2>&1';
-    my $du_cmd      = 'echo $(pwd); du -shc * 2>&1 | sort -h';
+    foreach my $game ( sort keys %{$game_ports} ) {
+        next if ( $game_ports->{$game}{'enabled'} eq '0' );
+        $con_cmd .=
+          "printf '%-30s' 'Connections to " . $game_ports->{$game}{'name'};
+        $con_cmd .= ": ' ; ss -Htu  state established '( sport = :";
+        $con_cmd .= $game_ports->{$game}{'port'} . " )' | wc -l;";
+    }
 
-foreach my $game ( sort keys %{$game_ports}) {
-    next if ( $game_ports->{$game}{'enabled'} eq '0' );
-    $con_cmd    .= "printf '%-30s' 'Connections to " . $game_ports->{$game}{'name'};
-    $con_cmd    .= ": ' ; ss -Htu  state established '( sport = :";
-    $con_cmd    .= $game_ports->{$game}{'port'} . " )' | wc -l;";
-}
+    print "$con_cmd\n";
 
-print "$con_cmd\n";
-
-my $iperf ="
+    my $iperf = "
 Field	Meaning of Non-Zero Values
 errors	Poorly or incorrectly negotiated mode and speed, or damaged network cable.
 dropped	Possibly due to iptables or other filtering rules, more likely due to lack of network buffer memory.
@@ -1575,30 +1619,27 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
          A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
 
+    unless ( connectSSH( user => $user, ip => $ip ) ) {
+        $output{'1_cpu'} = $SSH_connections{ $user . $ip }->capture(@cpu_cmd);
+        $output{'3_mem'} = $SSH_connections{ $user . $ip }->capture(@mem_cmd);
+        $output{'5_net'} =
+          $SSH_connections{ $user . $ip }->capture($net_cmd) . $iperf;
+        $output{'2_inet'}  = $SSH_connections{ $user . $ip }->capture($con_cmd);
+        $output{'6_io'}    = $SSH_connections{ $user . $ip }->capture($io_cmd);
+        $output{'7_disk'}  = $SSH_connections{ $user . $ip }->capture($df_cmd);
+        $output{'0_neo'}   = $SSH_connections{ $user . $ip }->capture($neo_cmd);
+        $output{'4_proc'}  = $SSH_connections{ $user . $ip }->capture(@pid_cmd);
+        $output{'8_files'} = $SSH_connections{ $user . $ip }->capture($du_cmd);
 
-
-     unless ( connectSSH( user => $user, ip => $ip ) ) {
-        $output{'1_cpu'} = $SSH_connections{$user.$ip}->capture(@cpu_cmd);
-        $output{'3_mem'} = $SSH_connections{$user.$ip}->capture(@mem_cmd);
-        $output{'5_net'} = $SSH_connections{$user.$ip}->capture($net_cmd) . $iperf;
-        $output{'2_inet'} = $SSH_connections{$user.$ip}->capture($con_cmd);
-        $output{'6_io'}  = $SSH_connections{$user.$ip}->capture($io_cmd);
-        $output{'7_disk'}  = $SSH_connections{$user.$ip}->capture($df_cmd);
-        $output{'0_neo'}  = $SSH_connections{$user.$ip}->capture($neo_cmd);
-        $output{'4_proc'}  = $SSH_connections{$user.$ip}->capture(@pid_cmd);
-        $output{'8_files'}  = $SSH_connections{$user.$ip}->capture($du_cmd);
-        
     }
     else {
         $output{'error'} = "$node is offline!";
     }
-    
+
     return \%output;
 }
 
-
 app->start;
-
 
 __DATA__
 
