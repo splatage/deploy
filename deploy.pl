@@ -1,6 +1,7 @@
 
 use v5.28;
-use Mojolicious::Lite -signatures, -async;
+use Mojolicious::Lite -signatures;
+use Mojo::AsyncAwait;
 use Mojo::mysql;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
