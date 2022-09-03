@@ -139,6 +139,7 @@ plugin Yancy => {
 ##      Cron Backups
 ###########################################################
 
+my $cron;
 my $settings = readFromDB(
         table    => 'games',
         column   => 'name',
