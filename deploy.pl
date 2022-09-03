@@ -134,6 +134,35 @@ plugin Yancy => {
     },
 };
 
+
+###########################################################
+##      Cron Backups
+###########################################################
+
+#Example
+my $cron_jobs = {};
+my %cron_jobs = %$cron_jobs;
+my $cron;
+
+my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        hash_ref => 'true'
+    );
+
+foreach my $game (keys %$settings) {
+    $cron = $settings->{$game}{'crontab'} or $cron = '0 * * * *' ;
+    $cron_jobs{$game => { 
+        sub => { app->minion->enqueue( store => [$game], { attempts => 1 } ) },
+        crontab => $cron
+        }
+    }
+}
+
+plugin Cron => (%cron_jobs);
+
+
+
 ###########################################################
 ##    Authentication
 ###########################################################
