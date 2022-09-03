@@ -212,7 +212,7 @@ get '/update/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -325,7 +325,7 @@ get '/deploy/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -357,7 +357,7 @@ get '/store/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 1  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -390,7 +390,7 @@ get '/link/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 1  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -422,7 +422,7 @@ get '/drop/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 2 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 1  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
