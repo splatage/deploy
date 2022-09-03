@@ -21,6 +21,7 @@ Perl modules:
   cpan install Mojolicious::Plugin::Yancy
   cpan install Yancy::Plugin::Auth::Password 
   cpan install Digest::Bcrypt
+  cpan install Mojo::AsyncAwait
 
 Connectivity:
   The deploy user needs SSH key access to the filestore and user@nodes.
