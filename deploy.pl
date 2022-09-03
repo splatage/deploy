@@ -160,7 +160,7 @@ foreach my $game (keys %{$settings}) {
 ##    Authentication
 ###########################################################
 #app->renderer->cache->max_keys(0);
-app->sessions->default_expiration( 1 * 60 * 60 );
+app->sessions->default_expiration( 24 * 60 * 60 );
 
 my $salt = pack "C16", map { int( 128 * rand() ) } 0 .. 15;
 
@@ -222,7 +222,7 @@ app->minion->add_task(
         my $lock = $game;
         return $job->finish(
             "Previous job $task for $game is still active. Refusing to proceed")
-          unless app->minion->lock( $lock, 1200 );
+          unless app->minion->lock( $lock, 300 );
 
         $job->app->log->info("Job: $task $game begins");
         sleep 5;
@@ -256,7 +256,7 @@ app->minion->add_task(
         my $lock = $game;
         return $job->finish(
             "Previous job $task for $game is still active. Refusing to proceed")
-          unless app->minion->lock( $lock, 1200 );
+          unless app->minion->lock( $lock, 300 );
 
         my $deploy = deployGame( game => $game );
         $job->note( deploy => $deploy );
@@ -335,7 +335,7 @@ app->minion->add_task(
         my $lock = $game;
         return $job->finish(
             "Previous job $task for $game is still active. Refusing to proceed")
-          unless app->minion->lock( $lock, 1200 );
+          unless app->minion->lock( $lock, 300 );
 
         $job->app->log->info("Job: $task $game begins");
 
@@ -368,7 +368,7 @@ app->minion->add_task(
         my $lock = $game;
         return $job->finish(
             "Previous job $task for $game is still active. Refusing to proceed")
-          unless app->minion->lock( $lock, 1200 );
+          unless app->minion->lock( $lock, 300 );
 
         $job->app->log->info("Job: $task $game begins");
 
