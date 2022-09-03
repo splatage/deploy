@@ -778,11 +778,11 @@ sub readFromDB {
     my $select = '*';
     $select = $column if ( $args{'hash_ref'} eq 'false' );
 
-    my $query = "SELECT $select FROM $table";
+    my $query = "SELECT $select FROM $table WHERE enabled = '1';";
     $log->debug("Reading DB table:");
 
     if ( $field ne '' && $value ne '' ) {
-        $query .= " WHERE $field = '$value'";
+        $query .= " WHERE $field = '$value' AND enabled = '1';";
     }
 
     $query .= ";";
