@@ -139,7 +139,6 @@ plugin Yancy => {
 ##      Cron Backups
 ###########################################################
 
-#Example
 my $cron_jobs = {};
 my %cron_jobs = %$cron_jobs;
 my $cron;
@@ -150,16 +149,15 @@ my $settings = readFromDB(
         hash_ref => 'true'
     );
 
-foreach my $game (keys %$settings) {
+foreach my $game (keys %{$settings}) {
+    $log->info("scheduled bachup for $game");
     $cron = $settings->{$game}{'crontab'} or $cron = '0 * * * *' ;
-    $cron_jobs{$game => { 
-        sub => { app->minion->enqueue( store => [$game], { attempts => 1 } ) },
-        crontab => $cron
-        }
-    }
+
+    $cron_jobs{$game}{'crontab'} = $cron;
+    $cron_jobs{$game}{'code'}     = "sub{ app->minion->enqueue( store => [$game], { attempts => 1 } )}";
 }
 
-plugin Cron => (%cron_jobs);
+plugin Cron => (\%cron_jobs);
 
 
 
