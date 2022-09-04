@@ -44,9 +44,6 @@ my $log_conf;           #
 
 read_config_file('config/deploy.cfg');
 
-my $dbh = DBI->connect( "DBI:MariaDB:database=$db_name;host=$db_host",
-    "$db_user", "$db_pass", { 'RaiseError' => 1 } );
-
 my $db_string = "mysql://" . $db_user . ":" . $db_pass . "@" . $db_host . "/" . $db_name;
 my $db = Mojo::mysql->strict_mode($db_string);
 
@@ -124,7 +121,7 @@ my $settings = readFromDB(
     );
 
 foreach my $game (keys %{$settings}) {
-    $cron = $settings->{$game}{'crontab'} or $cron = int(rand(5)) . ' * * * *';
+    $cron = $settings->{$game}{'crontab'} or $cron = '*/15 * * * *'; #int(rand(5) + 10)
     $log->info("scheduling backup for $game $cron");
 
     plugin Cron => ( $game => {crontab => $cron, code => sub {
@@ -765,12 +762,16 @@ sub readFromDB {
     my $field  = $args{'field'};
     my $value  = $args{'value'};
 
+    $log->debug("sub readFromDB: Connecting to DB table:$table column:$column field:$field value:$value" );
+
+    my $dbh = DBI->connect( "DBI:MariaDB:database=$db_name;host=$db_host",
+            "$db_user", "$db_pass", { 'RaiseError' => 1 } );
+
+      
     my ( $ref, $ref_name, $ref_value );
     my $result = {};
     my %result = %$result;
-
-    $log->debug("sub readFromDB");
-    
+   
     unless ( $dbh->ping ) {
         $log->info("No connection to DB...reconnecting");
         $dbh = DBI->connect( "DBI:MariaDB:database=$db_name;host=$db_host",
@@ -781,7 +782,6 @@ sub readFromDB {
     $select = $column if ( $args{'hash_ref'} eq 'false' );
 
     my $query = "SELECT $select FROM $table WHERE enabled = '1'";
-    $log->debug("Reading DB table:");
 
     if ( $field ne '' && $value ne '' ) {
         $query .= " AND $field = '$value'";
@@ -797,6 +797,12 @@ sub readFromDB {
     until($sth->mariadb_async_ready) {
         sleep 0.02;
         $count += 0.02;
+        if ( $count >= 5 ) {
+            $sth->finish();
+            $dbh->disconnect;
+            $log->debug("DB timedout after $count seconds");
+            return "DB timedout after $count seconds";
+        }
     }
 
     $sth->mariadb_async_result();
@@ -812,6 +818,7 @@ sub readFromDB {
     }
 
     $sth->finish();
+    $dbh->disconnect;
     $log->debug("DB free after $count seconds");
         
     if ( $args{'hash_ref'} eq 'true' ) {
@@ -840,12 +847,6 @@ sub checkIsOnline {
         hash_ref => 'true'
     );
 
-#    my $enabledGames = readFromDB(
-#        table    => 'games',
-#        column   => 'name',
-#        hash_ref => 'true'
-#    );
-
     my %enabledNodes = %$enabledNodes;
     my @live_nodes;
     my @dead_nodes;
@@ -867,7 +868,7 @@ sub checkIsOnline {
         @nodes_to_check = ( sort keys %{$enabledNodes} );
         $log->debug("Using nodes from DB");
     }
-print Dumper($enabledNodes);
+# print Dumper($enabledNodes);
     $log->debug("Pinging: \[@nodes_to_check\]");
 
     foreach my $this_node (@nodes_to_check) {
