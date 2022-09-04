@@ -69,8 +69,7 @@ read_config_file('config/deploy.cfg');
 my $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
     "$db_user", "$db_pass", { 'RaiseError' => 1 } );
 
-my $db_string =
-  "mysql://" . $db_user . ":" . $db_pass . "@" . $db_host . "/" . $db_name;
+my $db_string = "mysql://" . $db_user . ":" . $db_pass . "@" . $db_host . "/" . $db_name;
 my $db = Mojo::mysql->strict_mode($db_string);
 
 plugin Minion => { mysql => "$db_string" };
@@ -162,17 +161,20 @@ foreach my $game (keys %{$settings}) {
 #app->renderer->cache->max_keys(0);
 app->sessions->default_expiration( 24 * 60 * 60 );
 
-# my $salt = pack "C16", map { int( 64 * rand() + 25 ) } 0 .. 15;
-
+# my $salt = pack "A16", map { int( 128 * rand() + 24 ) } 0 .. 100;
+# my $salt = map { print chr int rand(128) + 24 } 1 .. 15;
 app->yancy->plugin(
     'Auth::Password' => {
         schema          => 'users',
-        allow_register  => 0,
+        allow_register  => 1,
         username_field  => 'email',
         password_field  => 'password',
         password_digest => {
-            type => 'SHA-256',
-        },
+            type => 'SHA-256'
+#            type => 'Bcrypt',
+#            cost => 12,
+#            salt => $salt
+        }
     }
 );
 
@@ -807,9 +809,17 @@ sub readFromDB {
     $query .= ";";
     $log->debug("$query");
 
-    my $sth = $dbh->prepare($query);
+    my $sth = $dbh->prepare_cached($query, { async => 1 });
     $sth->execute();
-
+    
+    my $time = 0;
+    until($sth->mysql_async_ready) {
+        # $log->debug('DB locked, waiting...');
+        sleep 0.05;
+        $time += 0.05;
+    }
+    $log->debug("DB free after $time seconds");
+    
     while ( $ref = $sth->fetchrow_hashref() ) {
         my $index_name = $ref->{$column};
 
@@ -1364,7 +1374,7 @@ sub configLogger {
         log4perl.appender.DBAppndr.params.2 = %p  
         log4perl.appender.DBAppndr.layout    = Log::Log4perl::Layout::NoopLayout
         log4perl.appender.DBAppndr.warp_message = 0
-        log4perl.appender.DBAppndr.usePreparedStmt = 1
+        log4perl.appender.DBAppndr.usepreparedStmt = 1
     };
 }
 
