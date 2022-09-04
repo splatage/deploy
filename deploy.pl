@@ -34,7 +34,6 @@ my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
 my %User_Preferences;
-my $users;
 my %SSH_connections;    # HASH Storing ssh connections
 my $log_conf;           #
 
@@ -125,7 +124,7 @@ my $settings = readFromDB(
     );
 
 foreach my $game (keys %{$settings}) {
-    $cron = $settings->{$game}{'crontab'} or $cron = int(rand(15)) . ' * * * *';
+    $cron = $settings->{$game}{'crontab'} or $cron = int(rand(5)) . ' * * * *';
     $log->info("scheduling backup for $game $cron");
 
     plugin Cron => ( $game => {crontab => $cron, code => sub {
@@ -802,8 +801,9 @@ sub readFromDB {
 
     $sth->mariadb_async_result();
     while ( $ref = $sth->fetchrow_hashref() ) {
-        my $index_name = $ref->{$column};
-
+        my $index_name;
+        $index_name = $column unless $index_name = $ref->{$column};
+           
         foreach ( @{ $sth->{NAME} } ) {
             $ref_name                       = $_;
             $ref_value                      = $ref->{$ref_name};
@@ -840,11 +840,11 @@ sub checkIsOnline {
         hash_ref => 'true'
     );
 
-    my $enabledGames = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        hash_ref => 'true'
-    );
+#    my $enabledGames = readFromDB(
+#        table    => 'games',
+#        column   => 'name',
+#        hash_ref => 'true'
+#    );
 
     my %enabledNodes = %$enabledNodes;
     my @live_nodes;
@@ -1323,7 +1323,7 @@ sub configLogger {
         log4perl.appender.Logfile           = Log::Log4perl::Appender::File
         log4perl.appender.Logfile.filename  = deploy.log
         log4perl.appender.Logfile.layout    = Log::Log4perl::Layout::PatternLayout
-        log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms %p %L %m %t %n%n 
+        log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms %p %L %m %T %n%n 
  
         log4perl.appender.Screen            = Log::Log4perl::Appender::Screen
         log4perl.appender.Screen.stderr     = 0
@@ -1360,7 +1360,7 @@ sub storeGame {
         @_,    # argument pair list goes here
     );
 
-    my $game = $args{'game'};
+    my $game = $args{'game'} or return "Game cannot be empty";;
 
     my ( $user, $suser, $cp_to, $cp_from );
 
@@ -1399,8 +1399,8 @@ sub storeGame {
 
     $log->info("store Gameserver: $game");
 
-    $user  = $settings->{$game}{"node_usr"};
-    $suser = $settings->{$game}{"store_usr"};
+    $user  = $settings->{$game}{'node_usr'};
+    $suser = $settings->{$game}{'store_usr'};
 
     if (!$user || !$suser || !$ip || !$sip ) {
         $log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
