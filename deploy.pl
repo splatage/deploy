@@ -34,7 +34,7 @@ my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
 #my $sth;                # DB Syntax Handle
-my $ref;                # HASH reference for DB results
+# my $ref;                # HASH reference for DB results
 my %settings;           # HASH storing the DB settings
 my %User_Preferences;
 my $users;
@@ -146,7 +146,7 @@ my $settings = readFromDB(
     );
 
 foreach my $game (keys %{$settings}) {
-    $cron = $settings->{$game}{'crontab'} or $cron = int(rand(60)) . ' * * * *';
+    $cron = $settings->{$game}{'crontab'} or $cron = '*/10 * * * *';      #int(rand(60)) . ' * * * *';
     $log->info("scheduling backup for $game $cron");
 
     plugin Cron => ( $game => {crontab => $cron, code => sub {
@@ -220,7 +220,7 @@ app->minion->add_task(
     update => sub ( $job, $game ) {
         my $task = 'update';
         my $lock = $game;
-        return $job->finish(
+        return $job->fail(
             "Previous job $task for $game is still active. Refusing to proceed")
           unless app->minion->lock( $lock, 300 );
 
@@ -254,7 +254,7 @@ app->minion->add_task(
     boot => sub ( $job, $game ) {
         my $task = 'boot';
         my $lock = $game;
-        return $job->finish(
+        return $job->fail(
             "Previous job $task for $game is still active. Refusing to proceed")
           unless app->minion->lock( $lock, 300 );
 
@@ -333,7 +333,7 @@ app->minion->add_task(
     deploy => sub ( $job, $game ) {
         my $task = 'deploy';
         my $lock = $game;
-        return $job->finish(
+        return $job->fail(
             "Previous job $task for $game is still active. Refusing to proceed")
           unless app->minion->lock( $lock, 300 );
 
@@ -366,7 +366,7 @@ app->minion->add_task(
 
         my $task = 'store';
         my $lock = $game;
-        return $job->finish(
+        return $job->fail(
             "Previous job $task for $game is still active. Refusing to proceed")
           unless app->minion->lock( $lock, 300 );
 
@@ -398,7 +398,7 @@ app->minion->add_task(
     link => sub ( $job, $game ) {
         my $task = 'link';
         my $lock = $game;
-        return $job->finish(
+        return $job->fail(
             "Previous job $task for $game is still active. Refusing to proceed")
           unless app->minion->lock( $lock, 10 );
 
@@ -430,7 +430,7 @@ app->minion->add_task(
     drop => sub ( $job, $game ) {
         my $task = 'drop';
         my $lock = $game;
-        return $job->finish(
+        return $job->fail(
             "Previous job $task for $game is still active. Refusing to proceed")
           unless app->minion->lock( $lock, 10 );
 
@@ -763,7 +763,7 @@ sub readLog {
 
     $return_string =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;
     $return_string =~ s/\r//g;
-    s/\007//g;
+    $return_string =~ s/\007//g;
     $return_string =~ s/[^[:print:]]+//g;
 
     return $return_string;
@@ -810,16 +810,16 @@ sub readFromDB {
     $log->debug("$query");
 
     my $sth = $dbh->prepare_cached($query, { async => 1 });
-    $sth->execute();
+    $sth->execute() or return "execution failed: $dbh->errstr()";
     
-    my $time = 0;
+    my $count = 0;
     until($sth->mysql_async_ready) {
         # $log->debug('DB locked, waiting...');
-        sleep 0.05;
-        $time += 0.05;
+        sleep 0.02;
+        $count += 0.02;
     }
-    $log->debug("DB free after $time seconds");
-    
+
+    $sth->mysql_async_result();
     while ( $ref = $sth->fetchrow_hashref() ) {
         my $index_name = $ref->{$column};
 
@@ -831,7 +831,8 @@ sub readFromDB {
     }
 
     $sth->finish();
-
+    $log->debug("DB free after $count seconds");
+        
     if ( $args{'hash_ref'} eq 'true' ) {
         return \%result;
     }
@@ -891,7 +892,7 @@ sub checkIsOnline {
         #my %this_node = %$this_node;
         $log->debug("this node: $this_node");
         my $p = Net::Ping->new;
-        if ( $p->ping( $enabledNodes{$this_node}{'ip'}, 0.01 ) ) {
+        if ( $p->ping( $enabledNodes->{$this_node}{'ip'}, 0.1 ) ) {
             $log->debug("[OK] $this_node is online");
             push @live_nodes, $this_node;
         }
@@ -905,7 +906,7 @@ sub checkIsOnline {
     foreach my $this_node (@live_nodes) {
         $log->debug("Query $this_node for games...");
 
-        my $ip = $enabledNodes{$this_node}{'ip'};
+        my $ip = $enabledNodes->{$this_node}{'ip'};
 
         if ( connectSSH( user => $user, ip => $ip ) ) {
             $return_hash{$this_node} = {};
@@ -953,7 +954,7 @@ sub checkIsOnline {
         my $game = $temp_hash{$result}{'game'};
 
         $log->warn("[!!] $game is running multiple times!")
-          if ( $return_hash{$list_by}{$game} );
+          if ( $return_hash->{$list_by}{$game} );
 
         $return_hash{$list_by}{$game}{'node'} = $temp_hash{$result}{'node'};
         $return_hash{$list_by}{$game}{'user'} = $temp_hash{$result}{'user'};
@@ -1298,7 +1299,7 @@ sub connectSSH {
 
             return 1;
         }
-        print "[OK] Connected to: $args{'user'}.$args{'ip'}";
+        $log->debug("[OK] Connected to: $args{'user'}.$args{'ip'}");
         $SSH_connections{ $args{'user'} . $args{'ip'} } = $this_connection;
 
         return 0;
@@ -1428,6 +1429,11 @@ sub storeGame {
 
     $user  = $settings->{$game}{"node_usr"};
     $suser = $settings->{$game}{"store_usr"};
+
+    if (!$user || !$suser || !$ip || !$sip ) {
+        $log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
+        return "Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip";
+    }
 
     $cp_from = $user . "@" . $ip . ":";
     $cp_from .= $settings->{$game}{"node_path"} . "/" . $game;
@@ -1560,6 +1566,11 @@ sub deployGame {
 
     $user  = $settings->{$game}{'node_usr'};
     $suser = $settings->{$game}{'store_usr'};
+    
+    if (!$user || !$suser || !$ip || !$sip ) {
+        $log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
+        return "Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip";
+    }
 
     $cp_to = $user . "@" . $ip . ":";
     $cp_to .= $settings->{$game}{'node_path'} . "/";
