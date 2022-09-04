@@ -162,7 +162,7 @@ foreach my $game (keys %{$settings}) {
 #app->renderer->cache->max_keys(0);
 app->sessions->default_expiration( 24 * 60 * 60 );
 
-my $salt = pack "C16", map { int( 128 * rand() ) } 0 .. 15;
+my $salt = pack "C16", map { int( 64 * rand() + 25 ) } 0 .. 15;
 
 app->yancy->plugin(
     'Auth::Password' => {
