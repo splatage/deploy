@@ -8,7 +8,7 @@ use Mojo::UserAgent;
 use IO::Socket::SSL;
 use Minion;
 use Net::OpenSSH;
-use DBD::mysql;
+use DBD::MariaDB;
 use DBI;
 use Carp         qw( croak );
 use Data::Dumper qw( Dumper );
@@ -33,32 +33,11 @@ my $db_host;            # From config file
 my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
-#my $sth;                # DB Syntax Handle
-# my $ref;                # HASH reference for DB results
-my %settings;           # HASH storing the DB settings
 my %User_Preferences;
 my $users;
 my %SSH_connections;    # HASH Storing ssh connections
-
-my $DBgames   = {};
-my %DBgames   = %$DBgames;
-my $DBglobals = {};
-my %DBglobals = %$DBglobals;
-my $DBnodes   = {};
-my %DBnodes   = %$DBnodes;
-
-my $enabledGames;       #
-my $disabledGames;      #
-my $enabledNodes;       #
-my $disabledNodes;      #
-
-my %online_games;       #
-my $online_nodes;       #
 my $log_conf;           #
-my @gateway_name;
-my $gatewayName;
 
-my $debug = 'false';    
 
 ###########################################################
 ##   Database Connection                                 ##
@@ -66,7 +45,7 @@ my $debug = 'false';
 
 read_config_file('config/deploy.cfg');
 
-my $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
+my $dbh = DBI->connect( "DBI:MariaDB:database=$db_name;host=$db_host",
     "$db_user", "$db_pass", { 'RaiseError' => 1 } );
 
 my $db_string = "mysql://" . $db_user . ":" . $db_pass . "@" . $db_host . "/" . $db_name;
@@ -770,9 +749,6 @@ sub readLog {
 }
 
 sub readFromDB {
-
-    refreshDB();
-
     my %args = (
         table    => '',
         column   => '',
@@ -795,6 +771,12 @@ sub readFromDB {
     my %result = %$result;
 
     $log->debug("sub readFromDB");
+    
+    unless ( $dbh->ping ) {
+        $log->info("No connection to DB...reconnecting");
+        $dbh = DBI->connect( "DBI:MariaDB:database=$db_name;host=$db_host",
+            "$db_user", "$db_pass", { 'RaiseError' => 1 } );
+    }
 
     my $select = '*';
     $select = $column if ( $args{'hash_ref'} eq 'false' );
@@ -809,17 +791,16 @@ sub readFromDB {
     $query .= ";";
     $log->debug("$query");
 
-    my $sth = $dbh->prepare_cached($query, { async => 1 });
-    $sth->execute() or return "execution failed: $dbh->errstr()";
+    my $sth = $dbh->prepare($query, { mariadb_async => 1 });
+    $sth->execute(); 
     
     my $count = 0;
-    until($sth->mysql_async_ready) {
-        # $log->debug('DB locked, waiting...');
+    until($sth->mariadb_async_ready) {
         sleep 0.02;
         $count += 0.02;
     }
 
-    $sth->mysql_async_result();
+    $sth->mariadb_async_result();
     while ( $ref = $sth->fetchrow_hashref() ) {
         my $index_name = $ref->{$column};
 
@@ -876,6 +857,8 @@ sub checkIsOnline {
     my $list_by     = $args{'list_by'};
     my $user        = $args{'user'};
 
+#print Dumper(\%args);
+
     if ( $args{'node'} ) {
         @nodes_to_check = $args{'node'};
         $log->debug("Using specified node");
@@ -884,7 +867,7 @@ sub checkIsOnline {
         @nodes_to_check = ( sort keys %{$enabledNodes} );
         $log->debug("Using nodes from DB");
     }
-
+print Dumper($enabledNodes);
     $log->debug("Pinging: \[@nodes_to_check\]");
 
     foreach my $this_node (@nodes_to_check) {
@@ -1228,15 +1211,6 @@ sub sendCommand {
     return $results;
 }
 
-sub refreshDB {
-    unless ( $dbh->ping ) {
-        $log->info("No connection to DB...reconnecting");
-        $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
-            "$db_user", "$db_pass", { 'RaiseError' => 1 } );
-    }
-
-    return 0;
-}
 
 sub read_config_file {
     my ($configfile) = $_[0];
@@ -1349,7 +1323,7 @@ sub configLogger {
         log4perl.appender.Logfile           = Log::Log4perl::Appender::File
         log4perl.appender.Logfile.filename  = deploy.log
         log4perl.appender.Logfile.layout    = Log::Log4perl::Layout::PatternLayout
-        log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms %p %L %m%n 
+        log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms %p %L %m %t %n%n 
  
         log4perl.appender.Screen            = Log::Log4perl::Appender::Screen
         log4perl.appender.Screen.stderr     = 0
@@ -1402,8 +1376,6 @@ sub storeGame {
     my $settings = readFromDB(
         table    => 'games',
         column   => 'name',
-        field    => 'name',
-        value    => $game,
         hash_ref => 'true'
     );
 
@@ -1425,7 +1397,7 @@ sub storeGame {
         hash_ref => 'false'
     );
 
-    $log->info("storeGamerserver: $game");
+    $log->info("store Gameserver: $game");
 
     $user  = $settings->{$game}{"node_usr"};
     $suser = $settings->{$game}{"store_usr"};
