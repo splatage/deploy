@@ -146,7 +146,7 @@ my $settings = readFromDB(
     );
 
 foreach my $game (keys %{$settings}) {
-    $cron = $settings->{$game}{'crontab'} or $cron = '*/10 * * * *';      #int(rand(60)) . ' * * * *';
+    $cron = $settings->{$game}{'crontab'} or $cron = int(rand(15)) . ' * * * *';
     $log->info("scheduling backup for $game $cron");
 
     plugin Cron => ( $game => {crontab => $cron, code => sub {
