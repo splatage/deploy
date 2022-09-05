@@ -664,11 +664,11 @@ sub update {
 
     print "connect: $user.$ip   $cmd\n";
 
-    $ssh->system("$cmd");
+    $ssh->{'link'}->system("$cmd");
 
     $cmd = "sha256sum $path";
     my @sha_file =
-      split( / /, $ssh->capture("$cmd") );
+      split( / /, $ssh->{'link'}->capture("$cmd") );
 
     if ( $sha_file[0] eq $sha256 ) {
         return "$file_name SHA: $sha256";
@@ -729,7 +729,7 @@ sub readLog {
     $cmd .= "&& tail -5000 ~/$game/game_files/screenlog.0 | tac | ";
     $cmd .= "sed '/Starting minecraft\\\|Enabled Waterfall/q' | tac";
 
-    my $log = $ssh->capture("$cmd");
+    my $log = $ssh->{'link'}->capture("$cmd");
     $log =~ s/ /\&nbsp;/g;
     my @lines = split( /\n/, $log );
 
@@ -900,7 +900,7 @@ sub checkIsOnline {
 
 
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
-        my $screen_list = $ssh->capture("@cmd");
+        my $screen_list = $ssh->{'link'}->capture("@cmd");
 
         #        $log->debug("$screen_list");
 
@@ -1133,7 +1133,7 @@ sub getFiles {
     return 1 if $ssh->{'error'};
 
 
-    my @files = $ssh->capture("cd $spath; find $game -type f ");
+    my @files = $ssh->{'link'}->capture("cd $spath; find $game -type f ");
     chomp(@files);
 
     #    for (@files) {
@@ -1185,9 +1185,9 @@ sub sendCommand {
 
     my $ssh = connectSSH( user => $user, ip => $ip );   #or die "Error establishing SSH" ;
 
-    $ssh->system("screen -p 0 -S $game -X clear");
-    $ssh->system("screen -p 0 -S $game -X hardcopy");
-    $ssh->system(
+    $ssh->{'link'}->system("screen -p 0 -S $game -X clear");
+    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
+    $ssh->{'link'}->system(
         "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
 
     $log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
@@ -1196,8 +1196,8 @@ sub sendCommand {
 
     Time::HiRes::sleep(0.05);
 
-    $ssh->system("screen -p 0 -S $game -X hardcopy");
-    $results = $ssh->capture("cat $game/game_files/hardcopy.0");
+    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
+    $results = $ssh->{'link'}->capture("cat $game/game_files/hardcopy.0");
 
     @results = split( '\n', $results );
     $results = $results if /\S/;
@@ -1245,15 +1245,19 @@ sub connectSSH {
     $args{'user'} || return "Aborting SSH: must specify username";
     $args{'ip'}   || return "Aborting SSH: must specify ip";
 
-    my $connection = $args{'user'} . "@" . $args{'ip'};
+    $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
+    $args{'link'}       = Net::OpenSSH->new( $args{'connection'}, 
+            batch_mode  => 1,
+            timeout     => 60,
+            master_opts => [ '-o StrictHostKeyChecking=no' ]
+        );
 
-    my $link = Net::OpenSSH->new( $connection, 
-        batch_mode  => 1,
-        timeout     => 10,
-        master_opts => [ '-o StrictHostKeyChecking=no' ]
-    );
+    $args{'debug'} = "Failed to establish SSH" if $args{'link'}->error;
 
-    return $link;
+    $args{'error'} = "Failed to establish SSH" unless $args{'link'}->check_master;
+
+    $log->debug("SSH established " . $args{'connection'});
+    return \%args;
 }
 
 
@@ -1399,7 +1403,7 @@ sub storeGame {
 "rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to"
     );
     my $output =
-      $ssh->capture(
+      $ssh->{'link'}->capture(
 "rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
       );
 
@@ -1459,7 +1463,7 @@ sub bootGame {
     my $ssh = connectSSH( user => $user, ip => $ip );
     return "SSH connection failed to $user@$ip" if $ssh->{'error'};
     
-    $ssh->system("$invocation");
+    $ssh->{'link'}->system("$invocation");
 
     sleep(10);
 
@@ -1537,7 +1541,7 @@ sub deployGame {
     my $ssh = connectSSH( user => $suser, ip => $sip );
     return "SSH connection failed to $suser@$sip" if $ssh->{'error'};
     
-    my $output = $ssh->capture("$rsync_cmd");
+    my $output = $ssh->{'link'}->capture("$rsync_cmd");
     return $output;
 }
 
@@ -1608,15 +1612,15 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
     my $ssh = connectSSH( user => $user, ip => $ip );
     return "SSH connection failed to $user@$ip" if $ssh->{'error'};
     
-        $output{'1_cpu'}   = $ssh->capture(@cpu_cmd);
-        $output{'3_mem'}   = $ssh->capture(@mem_cmd);
-        $output{'5_net'}   = $ssh->capture($net_cmd) . $iperf;
-        $output{'2_inet'}  = $ssh->capture($con_cmd);
-        $output{'6_io'}    = $ssh->capture($io_cmd);
-        $output{'7_disk'}  = $ssh->capture($df_cmd);
-        $output{'0_neo'}   = $ssh->capture($neo_cmd);
-        $output{'4_proc'}  = $ssh->capture(@pid_cmd);
-        $output{'8_files'} = $ssh->capture($du_cmd);
+        $output{'1_cpu'}   = $ssh->{'link'}->capture(@cpu_cmd);
+        $output{'3_mem'}   = $ssh->{'link'}->capture(@mem_cmd);
+        $output{'5_net'}   = $ssh->{'link'}->capture($net_cmd) . $iperf;
+        $output{'2_inet'}  = $ssh->{'link'}->capture($con_cmd);
+        $output{'6_io'}    = $ssh->{'link'}->capture($io_cmd);
+        $output{'7_disk'}  = $ssh->{'link'}->capture($df_cmd);
+        $output{'0_neo'}   = $ssh->{'link'}->capture($neo_cmd);
+        $output{'4_proc'}  = $ssh->{'link'}->capture(@pid_cmd);
+        $output{'8_files'} = $ssh->{'link'}->capture($du_cmd);
 
     return \%output;
 }
