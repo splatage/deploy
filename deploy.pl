@@ -314,7 +314,7 @@ app->minion->add_task(
 
         $job->app->log->info("$task $game completed");
         $job->finish(
-            { message => "$task $game completed", deploy => $output } );
+            { message => "$task $game completed" } );
         app->minion->unlock($lock);
     }
 );
@@ -347,7 +347,7 @@ app->minion->add_task(
 
         $job->app->log->info("$task $game completed");
         $job->finish(
-            { message => "$task $game completed", store => $output } );
+            { message => "$task $game completed" } );
         app->minion->unlock($lock);
     }
 );
