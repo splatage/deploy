@@ -34,7 +34,6 @@ my $db_user;            # From config file
 my $db_pass;            # From config file
 my $db_name;            # From config file
 my %User_Preferences;
-my %SSH_connections;    # HASH Storing ssh connections
 my $log_conf;           #
 
 
@@ -656,18 +655,20 @@ sub update {
 
     # Install Latest version
     my $user = $settings->{$game}{'node_usr'};
-    connectSSH( user => $user, ip => $ip );
-
+    
+    my $ssh = connectSSH( user => $user, ip => $ip );
+    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
+    
     $project_url = $project_url . '/downloads/' . $file_name;
     my $cmd = 'wget -c ' . $project_url . ' -O ' . $path;
 
     print "connect: $user.$ip   $cmd\n";
 
-    $SSH_connections{ $user . $ip }->system("$cmd");
+    $ssh->system("$cmd");
 
     $cmd = "sha256sum $path";
     my @sha_file =
-      split( / /, $SSH_connections{ $user . $ip }->capture("$cmd") );
+      split( / /, $ssh->capture("$cmd") );
 
     if ( $sha_file[0] eq $sha256 ) {
         return "$file_name SHA: $sha256";
@@ -721,13 +722,14 @@ sub readLog {
         return $warning;
     }
 
-    connectSSH( user => $user, ip => $ip );
+    my $ssh = connectSSH( user => $user, ip => $ip );
+    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
 
     my $cmd = "[ -f ~/$game/game_files/screenlog.0 ] ";
     $cmd .= "&& tail -5000 ~/$game/game_files/screenlog.0 | tac | ";
     $cmd .= "sed '/Starting minecraft\\\|Enabled Waterfall/q' | tac";
 
-    my $log = $SSH_connections{ $user . $ip }->capture("$cmd");
+    my $log = $ssh->capture("$cmd");
     $log =~ s/ /\&nbsp;/g;
     my @lines = split( /\n/, $log );
 
@@ -888,19 +890,17 @@ sub checkIsOnline {
     $log->debug("Checking: \[@live_nodes\]");
 
     foreach my $this_node (@live_nodes) {
+        $return_hash{$this_node} = {};
         $log->debug("Query $this_node for games...");
 
         my $ip = $enabledNodes->{$this_node}{'ip'};
 
-        if ( connectSSH( user => $user, ip => $ip ) ) {
-            $return_hash{$this_node} = {};
-            next;
-        }
+        my $ssh = connectSSH( user => $user, ip => $ip );
+        next if $ssh->{'error'} ;
 
-        $return_hash{$this_node} = {};
 
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
-        my $screen_list = $SSH_connections{ $user . $ip }->capture("@cmd");
+        my $screen_list = $ssh->capture("@cmd");
 
         #        $log->debug("$screen_list");
 
@@ -1129,11 +1129,11 @@ sub getFiles {
     my $results = {};
     my %results = %$results;
 
-    return 1 if connectSSH( user => $suser, ip => $sip );
+    my $ssh = connectSSH( user => $suser, ip => $sip );
+    return 1 if $ssh->{'error'};
 
-    # %SSH_connections{} is declared globally
-    my $ssh_connection = $SSH_connections{ $suser . $sip };
-    my @files = $ssh_connection->capture("cd $spath; find $game -type f ");
+
+    my @files = $ssh->capture("cd $spath; find $game -type f ");
     chomp(@files);
 
     #    for (@files) {
@@ -1183,14 +1183,11 @@ sub sendCommand {
 
     $log->debug("Sending command: $command to $game on $ip");
 
-    connectSSH( user => $user, ip => $ip );   #or die "Error establishing SSH" ;
+    my $ssh = connectSSH( user => $user, ip => $ip );   #or die "Error establishing SSH" ;
 
-    # %SSH_connections{} is declared globally
-    my $ssh_connection = $SSH_connections{ $user . $ip };
-
-    $ssh_connection->system("screen -p 0 -S $game -X clear");
-    $ssh_connection->system("screen -p 0 -S $game -X hardcopy");
-    $ssh_connection->system(
+    $ssh->system("screen -p 0 -S $game -X clear");
+    $ssh->system("screen -p 0 -S $game -X hardcopy");
+    $ssh->system(
         "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
 
     $log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
@@ -1199,8 +1196,8 @@ sub sendCommand {
 
     Time::HiRes::sleep(0.05);
 
-    $ssh_connection->system("screen -p 0 -S $game -X hardcopy");
-    $results = $ssh_connection->capture("cat $game/game_files/hardcopy.0");
+    $ssh->system("screen -p 0 -S $game -X hardcopy");
+    $results = $ssh->capture("cat $game/game_files/hardcopy.0");
 
     @results = split( '\n', $results );
     $results = $results if /\S/;
@@ -1237,9 +1234,8 @@ sub read_config_file {
     $db_name = $User_Preferences{'db_name'};
 }
 
+
 sub connectSSH {
-    ## Takes username and ip, and confirms/creates a SSH connection
-    ## Stores the connection in the global %SSH_connections{}
     my %args = (
         user => '',
         ip   => '',
@@ -1249,37 +1245,18 @@ sub connectSSH {
     $args{'user'} || return "Aborting SSH: must specify username";
     $args{'ip'}   || return "Aborting SSH: must specify ip";
 
-    if ( $SSH_connections{ $args{'user'} . $args{'ip'} } ) {
-        $SSH_connections{ $args{'user'} . $args{'ip'} }->check_master;
-        $log->debug("SSH $args{'user'}\@$args{'ip'} is healthy");
-        return 0;
-    }
+    my $connection = $args{'user'} . "@" . $args{'ip'};
 
-    else {
-        $log->debug("New SSH: $args{'user'}\@$args{'ip'}");
+    my $link = Net::OpenSSH->new( $connection, 
+        batch_mode  => 1,
+        timeout     => 10,
+        master_opts => [ '-o StrictHostKeyChecking=no' ]
+    );
 
-        my $this_connection;
-        my $connection = $args{'user'} . "@" . $args{'ip'};
-
-        $this_connection = Net::OpenSSH->new( $connection,
-            master_opts =>
-              [ '-o PasswordAuthentication=no', '-o StrictHostKeyChecking=no' ]
-        );
-
-        if ( $this_connection->error ) {
-            print "[!!] Error connecting to $args{'ip'}:";
-            print $this_connection->error . "\n";
-
-            # print Dumper $this_connection;
-
-            return 1;
-        }
-        $log->debug("[OK] Connected to: $args{'user'}.$args{'ip'}");
-        $SSH_connections{ $args{'user'} . $args{'ip'} } = $this_connection;
-
-        return 0;
-    }
+    return $link;
 }
+
+
 
 # haltGame(game => 'benchmark');
 sub haltGame {
@@ -1415,13 +1392,14 @@ sub storeGame {
 
     $log->debug(" $cp_from $cp_to ");
 
-    my $output = connectSSH( user => $suser, ip => $sip ) . "\n";
+    my $ssh = connectSSH( user => $suser, ip => $sip );
+    return "SSH connection failed to $suser@$sip" if $ssh->{'error'};
 
     $log->debug(
 "rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to"
     );
-    $output .=
-      $SSH_connections{ $suser . $sip }->capture(
+    my $output =
+      $ssh->capture(
 "rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
       );
 
@@ -1478,8 +1456,10 @@ sub bootGame {
     $log->trace("$invocation");
     $user = $settings->{$game}{'node_usr'};
 
-    my $output = connectSSH( user => $user, ip => $ip );
-    $SSH_connections{ $user . $ip }->system("$invocation");
+    my $ssh = connectSSH( user => $user, ip => $ip );
+    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
+    
+    $ssh->system("$invocation");
 
     sleep(10);
 
@@ -1554,13 +1534,11 @@ sub deployGame {
        $rsync_cmd .= "-o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
     $log->debug(" $rsync_cmd ");
 
-    unless ( connectSSH( user => $suser, ip => $sip ) ) {
-        my $output = $SSH_connections{ $suser . $sip }->capture("$rsync_cmd");
-        return $output;
-    }
-    else {
-        return 1;
-    }
+    my $ssh = connectSSH( user => $suser, ip => $sip );
+    return "SSH connection failed to $suser@$sip" if $ssh->{'error'};
+    
+    my $output = $ssh->capture("$rsync_cmd");
+    return $output;
 }
 
 #infoNode( node => 'node5' );
@@ -1627,23 +1605,18 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
          Non-zero indicates problems negotiating appropriate duplex mode. 
          A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
-
-    unless ( connectSSH( user => $user, ip => $ip ) ) {
-        $output{'1_cpu'} = $SSH_connections{ $user . $ip }->capture(@cpu_cmd);
-        $output{'3_mem'} = $SSH_connections{ $user . $ip }->capture(@mem_cmd);
-        $output{'5_net'} =
-          $SSH_connections{ $user . $ip }->capture($net_cmd) . $iperf;
-        $output{'2_inet'}  = $SSH_connections{ $user . $ip }->capture($con_cmd);
-        $output{'6_io'}    = $SSH_connections{ $user . $ip }->capture($io_cmd);
-        $output{'7_disk'}  = $SSH_connections{ $user . $ip }->capture($df_cmd);
-        $output{'0_neo'}   = $SSH_connections{ $user . $ip }->capture($neo_cmd);
-        $output{'4_proc'}  = $SSH_connections{ $user . $ip }->capture(@pid_cmd);
-        $output{'8_files'} = $SSH_connections{ $user . $ip }->capture($du_cmd);
-
-    }
-    else {
-        $output{'error'} = "$node is offline!";
-    }
+    my $ssh = connectSSH( user => $user, ip => $ip );
+    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
+    
+        $output{'1_cpu'}   = $ssh->capture(@cpu_cmd);
+        $output{'3_mem'}   = $ssh->capture(@mem_cmd);
+        $output{'5_net'}   = $ssh->capture($net_cmd) . $iperf;
+        $output{'2_inet'}  = $ssh->capture($con_cmd);
+        $output{'6_io'}    = $ssh->capture($io_cmd);
+        $output{'7_disk'}  = $ssh->capture($df_cmd);
+        $output{'0_neo'}   = $ssh->capture($neo_cmd);
+        $output{'4_proc'}  = $ssh->capture(@pid_cmd);
+        $output{'8_files'} = $ssh->capture($du_cmd);
 
     return \%output;
 }
