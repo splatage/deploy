@@ -124,7 +124,7 @@ foreach my $game (keys %{$settings}) {
     $log->info("scheduling backup for $game $cron");
 
     plugin Cron => ( $game => {crontab => $cron, code => sub {
-        app->minion->enqueue( store => [$game], { attempts => 1 } );
+        app->minion->enqueue( store => [$game], { attempts => 2, expire => 120 } );
      } } );
 }
 
@@ -186,7 +186,7 @@ get '/update/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -194,8 +194,7 @@ app->minion->add_task(
     update => sub ( $job, $game ) {
         my $task = 'update';
         my $lock = $game;
-        return $job->fail(
-            "Previous job $task for $game is still active. Refusing to proceed")
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 300 );
 
         $job->app->log->info("Job: $task $game begins");
@@ -219,7 +218,7 @@ get '/boot/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
 
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
@@ -228,21 +227,20 @@ app->minion->add_task(
     boot => sub ( $job, $game ) {
         my $task = 'boot';
         my $lock = $game;
-        return $job->fail(
-            "Previous job $task for $game is still active. Refusing to proceed")
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 300 );
 
         my $deploy = deployGame( game => $game );
-        $job->note( deploy => $deploy );
+        $job->note( deploy => "$game $deploy" );
 
         my $update = update( game => $game );
-        $job->note( update => $update );
+        $job->note( update => "$game $update" );
 
         my $boot = bootGame( game => $game, server_bin => $update );
-        $job->note( boot => $boot );
+        $job->note( boot => "$game $boot" );
 
         my $regist = registerGame( game => $game );
-        $job->note( register => $regist );
+        $job->note( register => "$game $regist" );
 
         $job->app->log->info("$task $game completed");
         unless ($boot) {
@@ -264,7 +262,7 @@ get '/halt/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -272,16 +270,15 @@ app->minion->add_task(
     halt => sub ( $job, $game ) {
         my $task = 'halt';
         my $lock = $game;
-        return $job->fail(
-            "Previous job $task for $game is still active. Refusing to proceed")
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 60 );
 
         $job->app->log->info("Job: $task $game begins");
 
         my $store = storeGame( game => $game );
-        $job->note( storegame => $store );
+        $job->note( store => "$game $store" );
         my $halt = haltGame( game => $game );
-        $job->note( halt => $halt );
+        $job->note( halt => "$game $halt" );
 
         $job->app->log->info("$task $game completed");
         $job->finish( { message => "$task $game completed" } );
@@ -299,7 +296,7 @@ get '/deploy/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 1 } );
+    $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -307,13 +304,13 @@ app->minion->add_task(
     deploy => sub ( $job, $game ) {
         my $task = 'deploy';
         my $lock = $game;
-        return $job->fail(
-            "Previous job $task for $game is still active. Refusing to proceed")
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 300 );
 
         $job->app->log->info("Job: $task $game begins");
 
         my $output = deployGame( game => $game );
+        $job->note( deploy => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish(
@@ -331,7 +328,7 @@ get '/store/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 1  } );
+    $c->minion->enqueue( $task => [$game], { attempts => 2  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -340,13 +337,13 @@ app->minion->add_task(
 
         my $task = 'store';
         my $lock = $game;
-        return $job->fail(
-            "Previous job $task for $game is still active. Refusing to proceed")
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 300 );
 
         $job->app->log->info("Job: $task $game begins");
 
         my $output = storeGame( game => $game );
+        $job->note( store => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish(
@@ -364,7 +361,7 @@ get '/link/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 1  } );
+    $c->minion->enqueue( $task => [$game], { attempts => 2  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -372,14 +369,13 @@ app->minion->add_task(
     link => sub ( $job, $game ) {
         my $task = 'link';
         my $lock = $game;
-        return $job->fail(
-            "Previous job $task for $game is still active. Refusing to proceed")
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 10 );
 
         $job->app->log->info("Job: $task $game begins");
 
-        my $regist = registerGame( game => $game );
-        $job->note( register => $regist );
+        my $output = registerGame( game => $game );
+        $job->note( register => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish( { message => "$task $game completed" } );
@@ -396,7 +392,7 @@ get '/drop/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
 
     # $c->minion->enqueue($task => [$game],{queue => $game});
-    $c->minion->enqueue( $task => [$game], { attempts => 1  } );
+    $c->minion->enqueue( $task => [$game], { attempts => 2  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
 };
@@ -404,13 +400,13 @@ app->minion->add_task(
     drop => sub ( $job, $game ) {
         my $task = 'drop';
         my $lock = $game;
-        return $job->fail(
-            "Previous job $task for $game is still active. Refusing to proceed")
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 10 );
 
         $job->app->log->info("Job: $task $game begins");
 
-        deregisterGame( game => $game );
+        my $output = deregisterGame( game => $game );
+        $job->note( deregister => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish( { message => "$task $game completed" } );
