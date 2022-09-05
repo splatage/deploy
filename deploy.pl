@@ -133,7 +133,7 @@ foreach my $game (keys %{$settings}) {
 ##    Authentication
 ###########################################################
 #app->renderer->cache->max_keys(0);
-app->sessions->default_expiration( 24 * 60 * 60 );
+app->sessions->default_expiration( 1 * 60 * 60 );
 
 # my $salt = pack "A16", map { int( 128 * rand() + 24 ) } 0 .. 100;
 # my $salt = map { print chr int rand(128) + 24 } 1 .. 15;
