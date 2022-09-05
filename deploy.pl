@@ -140,7 +140,7 @@ app->sessions->default_expiration( 24 * 60 * 60 );
 app->yancy->plugin(
     'Auth::Password' => {
         schema          => 'users',
-        allow_register  => 1,
+        allow_register  => 0,
         username_field  => 'email',
         password_field  => 'password',
         password_digest => {
@@ -657,7 +657,8 @@ sub update {
     my $user = $settings->{$game}{'node_usr'};
     
     my $ssh = connectSSH( user => $user, ip => $ip );
-    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
+    return $ssh->{'error'} if $ssh->{'error'};
+    return $ssh->{'debug'} if $ssh->{'debug'};
     
     $project_url = $project_url . '/downloads/' . $file_name;
     my $cmd = 'wget -c ' . $project_url . ' -O ' . $path;
@@ -723,7 +724,8 @@ sub readLog {
     }
 
     my $ssh = connectSSH( user => $user, ip => $ip );
-    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
+    return $ssh->{'error'} if $ssh->{'error'};
+    return $ssh->{'debug'} if $ssh->{'debug'};
 
     my $cmd = "[ -f ~/$game/game_files/screenlog.0 ] ";
     $cmd .= "&& tail -5000 ~/$game/game_files/screenlog.0 | tac | ";
@@ -897,6 +899,7 @@ sub checkIsOnline {
 
         my $ssh = connectSSH( user => $user, ip => $ip );
         next if $ssh->{'error'} ;
+        next if $ssh->{'debug'} ;
 
 
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
@@ -1248,13 +1251,19 @@ sub connectSSH {
     $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
     $args{'link'}       = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
-            timeout     => 60,
+            timeout     => 10,
             master_opts => [ '-o StrictHostKeyChecking=no' ]
         );
 
-    $args{'debug'} = "Failed to establish SSH" if $args{'link'}->error;
+    if ( $args{'link'}->error ) {
+        $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
+        $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
+    };
 
-    $args{'error'} = "Failed to establish SSH" unless $args{'link'}->check_master;
+    unless ( $args{'link'}->check_master ) {
+        $args{'debug'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->check_master; 
+        $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->check_master);
+    };
 
     $log->debug("SSH established " . $args{'connection'});
     return \%args;
@@ -1397,7 +1406,8 @@ sub storeGame {
     $log->debug(" $cp_from $cp_to ");
 
     my $ssh = connectSSH( user => $suser, ip => $sip );
-    return "SSH connection failed to $suser@$sip" if $ssh->{'error'};
+    return $ssh->{'error'} if $ssh->{'error'};
+    return $ssh->{'debug'} if $ssh->{'debug'};
 
     $log->debug(
 "rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to"
@@ -1461,7 +1471,8 @@ sub bootGame {
     $user = $settings->{$game}{'node_usr'};
 
     my $ssh = connectSSH( user => $user, ip => $ip );
-    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
+    return $ssh->{'error'} if $ssh->{'error'};
+    return $ssh->{'debug'} if $ssh->{'debug'};
     
     $ssh->{'link'}->system("$invocation");
 
@@ -1539,7 +1550,8 @@ sub deployGame {
     $log->debug(" $rsync_cmd ");
 
     my $ssh = connectSSH( user => $suser, ip => $sip );
-    return "SSH connection failed to $suser@$sip" if $ssh->{'error'};
+    return $ssh->{'error'} if $ssh->{'error'};
+    return $ssh->{'debug'} if $ssh->{'debug'};
     
     my $output = $ssh->{'link'}->capture("$rsync_cmd");
     return $output;
@@ -1610,7 +1622,8 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
          A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
     my $ssh = connectSSH( user => $user, ip => $ip );
-    return "SSH connection failed to $user@$ip" if $ssh->{'error'};
+    return $ssh->{'error'} if $ssh->{'error'};
+    return $ssh->{'debug'} if $ssh->{'debug'};
     
         $output{'1_cpu'}   = $ssh->{'link'}->capture(@cpu_cmd);
         $output{'3_mem'}   = $ssh->{'link'}->capture(@mem_cmd);
