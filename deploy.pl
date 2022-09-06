@@ -15,7 +15,7 @@ use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
-use Net::Ping;
+# use Net::Ping;
 use Log::Log4perl;
 use Crypt::PBKDF2;
 use File::Basename;
@@ -858,7 +858,8 @@ sub checkIsOnline {
     my $list_by     = $args{'list_by'};
     my $user        = $args{'user'};
 
-#print Dumper(\%args);
+    my $t_shoot = Dumper(\%args);
+    $log->debug("$t_shoot");
 
     if ( $args{'node'} ) {
         @nodes_to_check = $args{'node'};
@@ -869,25 +870,25 @@ sub checkIsOnline {
         $log->debug("Using nodes from DB");
     }
 # print Dumper($enabledNodes);
-    $log->debug("Pinging: \[@nodes_to_check\]");
+    $log->debug("Query: \[@nodes_to_check\]");
 
-    foreach my $this_node (@nodes_to_check) {
+#    foreach my $this_node (@nodes_to_check) {
 
         #my %this_node = %$this_node;
-        $log->debug("this node: $this_node");
-        my $p = Net::Ping->new;
-        if ( $p->ping( $enabledNodes->{$this_node}{'ip'}, 0.1 ) ) {
-            $log->debug("[OK] $this_node is online");
-            push @live_nodes, $this_node;
-        }
-        else {
-            $log->debug("[!!] $this_node is offline");
-            push @dead_nodes, $this_node;
-        }
-    }
-    $log->debug("Checking: \[@live_nodes\]");
+#        $log->debug("Ping check: $this_node " . $enabledNodes->{$this_node}{'ip'});
+#        my $p = Net::Ping->new;
+#        if ( $p->ping( $enabledNodes->{$this_node}{'ip'}, 1 ) ) {
+#            $log->debug("[OK] $this_node is online");
+#            push @live_nodes, $this_node;
+#        }
+#        else {
+#            $log->debug("[!!] $this_node is offline");
+#            push @dead_nodes, $this_node;
+#        }
+#    }
+#    $log->debug("Checking: \[@live_nodes\]");
 
-    foreach my $this_node (@live_nodes) {
+    foreach my $this_node (@nodes_to_check) {
         $return_hash{$this_node} = {};
         $log->debug("Query $this_node for games...");
 
@@ -901,7 +902,7 @@ sub checkIsOnline {
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
         my $screen_list = $ssh->{'link'}->capture("@cmd");
 
-        #        $log->debug("$screen_list");
+        #$log->debug("$screen_list");
 
         my @screen_list = split( '\n', $screen_list );
 
@@ -958,13 +959,13 @@ sub checkIsOnline {
     if ( $args{game} ) {
 
         if ( $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} ) {
-            $log->debug(
-"Found $args{'game'} on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}"
+            $log->debug( "Found $args{'game'} on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}"
             );
             return "$return_hash{ $args{'game'} }{ $args{'game'} }{'node'}";
         }
 
         else {
+            $log->debug( "$args{'game'} not found on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}");
             return 0;
         }
     }
@@ -1248,7 +1249,7 @@ sub connectSSH {
     $args{'link'}       = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
             timeout     => 10,
-            master_opts => [ '-o StrictHostKeyChecking=no' ]
+            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=1' ]
         );
 
     if ( $args{'link'}->error ) {
@@ -1315,7 +1316,7 @@ sub configLogger {
         log4perl.appender.Screen            = Log::Log4perl::Appender::Screen
         log4perl.appender.Screen.stderr     = 0
         log4perl.appender.Screen.layout    = Log::Log4perl::Layout::PatternLayout
-        log4perl.appender.Screen.layout.ConversionPattern = [%r|%R]ms [%p]:%L %m%n 
+        log4perl.appender.Screen.layout.ConversionPattern = [%r|%R]ms [%p] {%P}:%L %m%n 
   
         log4perl.appender.DBAppndr            = Log::Log4perl::Appender::DBI
     };
@@ -1351,7 +1352,7 @@ sub storeGame {
 
     my ( $user, $suser, $cp_to, $cp_from );
 
-    my $error = "Aborting task as $game is offline!! ";
+    my $error = "Aborting task as $game is offline or cannot be reached!! ";
     $error .= "It's potentially catastrophic to overwrite ";
     $error .= "the primary store with data we cannot verify. ";
     $error .= "Please ensure the game is running to prove viabitiy ";
@@ -2123,7 +2124,7 @@ __DATA__
 
 
 @@ log.html.ep
-
+% layout 'default';
 <!DOCTYPE html>
 <html>
   <head>
