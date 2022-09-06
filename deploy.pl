@@ -754,8 +754,8 @@ sub readFromDB {
         @_
     );
 
-    return 1 if not $args{'table'};
-    return 1 if not $args{'column'};
+    return 0 if not $args{'table'};
+    return 0 if not $args{'column'};
 
     my $table  = $args{'table'};
     my $column = $args{'column'};
@@ -847,6 +847,8 @@ sub checkIsOnline {
         hash_ref => 'true'
     );
 
+    return 0 unless $enabledNodes;
+
     my %enabledNodes = %$enabledNodes;
     my @live_nodes;
     my @dead_nodes;
@@ -869,24 +871,9 @@ sub checkIsOnline {
         @nodes_to_check = ( sort keys %{$enabledNodes} );
         $log->debug("Using nodes from DB");
     }
-# print Dumper($enabledNodes);
+
     $log->debug("Query: \[@nodes_to_check\]");
 
-#    foreach my $this_node (@nodes_to_check) {
-
-        #my %this_node = %$this_node;
-#        $log->debug("Ping check: $this_node " . $enabledNodes->{$this_node}{'ip'});
-#        my $p = Net::Ping->new;
-#        if ( $p->ping( $enabledNodes->{$this_node}{'ip'}, 1 ) ) {
-#            $log->debug("[OK] $this_node is online");
-#            push @live_nodes, $this_node;
-#        }
-#        else {
-#            $log->debug("[!!] $this_node is offline");
-#            push @dead_nodes, $this_node;
-#        }
-#    }
-#    $log->debug("Checking: \[@live_nodes\]");
 
     foreach my $this_node (@nodes_to_check) {
         $return_hash{$this_node} = {};
@@ -1166,8 +1153,7 @@ sub sendCommand {
     );
 
     # Order of prioroty for node:- commandline, then livegames then DB
-    $node = checkIsOnline( list_by => 'node', node => '', game => $game )
-      unless $node;
+    $node = checkIsOnline( list_by => 'node', node => '', game => $game ) unless $node;
     $node = $settings->{$game}{'node'} unless $node;
 
     my $ip = readFromDB(
@@ -1249,7 +1235,7 @@ sub connectSSH {
     $args{'link'}       = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
             timeout     => 10,
-            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=1' ]
+            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
         );
 
     if ( $args{'link'}->error ) {
