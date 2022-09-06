@@ -120,7 +120,7 @@ my $settings = readFromDB(
     );
 
 foreach my $game (keys %{$settings}) {
-    $cron = $settings->{$game}{'crontab'} or $cron = '*/15 * * * *'; #int(rand(5) + 10)
+    $cron = $settings->{$game}{'crontab'} or $cron = int(rand(5)) . ' * * * *'; #int(rand(5) + 10)
     $log->info("scheduling backup for $game $cron");
 
     plugin Cron => ( $game => {crontab => $cron, code => sub {
@@ -153,7 +153,7 @@ app->yancy->plugin(
 );
 
 group {
-    my $route = under 'minion' => sub ($c) {
+    my $route = under '/minion' => sub ($c) {
         my $name = $c->yancy->auth->current_user || '';
         if ( $name ne '' ) {
             return 1;
@@ -163,6 +163,19 @@ group {
     };
     plugin 'Minion::Admin' => { route => $route };
 };
+
+group {
+    my $route = under '/status' => sub ($c) {
+        my $name = $c->yancy->auth->current_user || '';
+        if ( $name ne '' ) {
+            return 1;
+        }
+        $c->res->headers->www_authenticate('Basic');
+        return undef;
+    };
+    plugin 'Status' => {return_to => '/', route => $route};
+};
+
 
 under sub ($c) {
 
@@ -860,8 +873,8 @@ sub checkIsOnline {
     my $list_by     = $args{'list_by'};
     my $user        = $args{'user'};
 
-    my $t_shoot = Dumper(\%args);
-    $log->debug("$t_shoot");
+#    my $t_shoot = Dumper(\%args);
+#    $log->debug("$t_shoot");
 
     if ( $args{'node'} ) {
         @nodes_to_check = $args{'node'};
@@ -900,6 +913,7 @@ sub checkIsOnline {
 
                 # SCREEN has ppid of 1. Load the PID and game
                 $temp_hash{ $column[1] . $this_node }{'node'} = $this_node;
+                $temp_hash{ $column[1] . $this_node }{'ip'}   = $ip;
                 $temp_hash{ $column[1] . $this_node }{'user'} = $column[0];
                 $temp_hash{ $column[1] . $this_node }{'game'} = $column[12];
             }
@@ -936,18 +950,25 @@ sub checkIsOnline {
         $return_hash{$list_by}{$game}{'pmem'} = $temp_hash{$result}{'pmem'};
         $return_hash{$list_by}{$game}{'vsz'}  = $temp_hash{$result}{'vsz'};
         $return_hash{$list_by}{$game}{'rss'}  = $temp_hash{$result}{'rss'};
+        $return_hash{$list_by}{$game}{'ip'}   = $temp_hash{$result}{'ip'};
     }
 
+#     my $t_shoot = Dumper(%return_hash);
+#     $log->debug($t_shoot);
+    
     ## Load the offline nodes
     foreach my $offline (@dead_nodes) {
         $return_hash{$offline}{'offline'}{'offline'} = 'true';
     }
-
-    if ( $args{game} ) {
+    
+    if ( $args{'game'} ) {
 
         if ( $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} ) {
-            $log->debug( "Found $args{'game'} on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}"
+            $log->debug( "Found " . $args{'game'} . " on " 
+                . $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} . " "
+                . $return_hash{ $args{'game'} }{ $args{'game'} }{'ip'}
             );
+            
             return "$return_hash{ $args{'game'} }{ $args{'game'} }{'node'}";
         }
 
@@ -1334,7 +1355,7 @@ sub storeGame {
         @_,    # argument pair list goes here
     );
 
-    my $game = $args{'game'} or return "Game cannot be empty";;
+    my $game = $args{'game'} or return "Game cannot be empty";
 
     my ( $user, $suser, $cp_to, $cp_from );
 
@@ -1626,7 +1647,7 @@ app->start;
 __DATA__
 
 
-@@ layouts/default.html.ep
+@@ layouts/nav.html.ep
 <!DOCTYPE html>
 <html>
 <head>
@@ -1690,6 +1711,9 @@ __DATA__
           <a class="nav-link" href="/minion">minions</a>
         </li>
         <li class="nav-item">
+          <a class="nav-link" href="/status">status</a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link" href="https://stats.splatage.com">stats</a>
         </li>
         <li class="nav-item">
@@ -1733,21 +1757,28 @@ __DATA__
     </div>
   </div>
 </nav>
-
-
   <div height: 100%;>
     <main class="container bg-secondary shadow-lg p-3 mb-5 mt-4 bg-body rounded" style="--bs-bg-opacity: .95;">
         %= content
     </main>
   </div>
+<footer class="bg-light text-center text-lg-start">
+  <!-- Copyright -->
+  <div class="text-center p-3" style="background-color: rgba(0, 0, 0, 0.2);">
+    © 2022 copyright splatage.com:
+    <a class="text-dark" href="hhttps://github.com/splatage/deploy">source code on github</a>
+  </div>
+  <!-- Copyright -->
+</footer>
+
 </body>
 </html>
 
 
 
-
 @@ node.html.ep
-% layout 'default';
+% layout 'nav'; 
+
 <!DOCTYPE html>
 <html>
   <body>
@@ -1968,7 +1999,8 @@ __DATA__
 
 
 @@ index.html.ep
-% layout 'default';
+% layout 'nav'; 
+
 <!DOCTYPE html>
 <html>
 
@@ -2110,7 +2142,8 @@ __DATA__
 
 
 @@ log.html.ep
-% layout 'default';
+% layout 'nav'; 
+
 <!DOCTYPE html>
 <html>
   <head>
@@ -2237,7 +2270,8 @@ pre {
 
 
 @@ files.html.ep
-% layout 'default';
+% layout 'nav'; 
+
 <!DOCTYPE html>
 
 <html>
@@ -2266,7 +2300,8 @@ pre {
 
 
 @@ node_details.html.ep
-% layout 'default';
+% layout 'nav'; 
+
 <!DOCTYPE html>
 <html>
     <body class="m-0 border-0">
@@ -2293,8 +2328,11 @@ pre {
 
 
 
+
+
 @@ login.html.ep
-% layout 'default';
+% layout 'nav'; 
+
 <!DOCTYPE html>
 <html>
     <body class="m-0 border-0">
