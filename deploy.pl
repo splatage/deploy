@@ -1,6 +1,6 @@
 
 use v5.28;
-use Mojolicious::Lite -signatures;
+use Mojolicious::Lite -signatures, -async_await;
 use Mojo::AsyncAwait;
 use Mojo::mysql;
 use Mojolicious::Plugin::Authentication;
@@ -438,7 +438,8 @@ get '/' => sub ($c) {
     my $results = checkIsOnline(
         list_by => 'node',
         node    => '',
-        game    => ''
+        game    => '',
+        ssh_master => 'true'
     );
 
     my $expected = readFromDB(
@@ -1788,16 +1789,56 @@ __DATA__
     </div>
   </div>
 </nav>
+
+
   <div height: 100%;>
     <main class="container bg-secondary shadow-lg p-3 mb-5 mt-4 bg-body rounded" style="--bs-bg-opacity: .95;">
         %= content
     </main>
   </div>
-<footer class="bg-light text-center text-lg-start">
+  
+  
+<footer class="bg-dark text-center text-white">
+  <!-- Grid container -->
+  <div class="container p-4 pb-0">
+    <!-- Section: Social media -->
+    <section class="mb-4">
+      <!-- Facebook -->
+      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
+        ><i class="fab fa-facebook-f"></i
+      ></a>
+
+      <!-- Twitter -->
+      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
+        ><i class="fab fa-twitter"></i
+      ></a>
+
+      <!-- Google -->
+      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
+        ><i class="fab fa-google"></i
+      ></a>
+
+      <!-- Instagram -->
+      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
+        ><i class="fab fa-instagram"></i
+      ></a>
+      <!-- Github -->
+      <a class="btn btn-outline-light btn-floating m-1" href="https://github.com/mojolicious/mojo-status" role="button"
+        ><i class="fab fa-github"></i
+      ></a>
+      <!-- Github -->
+      <a class="btn btn-outline-light btn-floating m-1" href="https://github.com/splatage/deploy" role="button"
+        ><i class="fab fa-github"></i
+      ></a>
+    </section>
+    <!-- Section: Social media -->
+  </div>
+  <!-- Grid container -->
+
   <!-- Copyright -->
   <div class="text-center p-3" style="background-color: rgba(0, 0, 0, 0.2);">
-    © 2022 copyright splatage.com:
-    <a class="text-dark" href="hhttps://github.com/splatage/deploy">source code on github</a>
+    © 2022 Copyright:
+    <a class="text-white" href="https://splatage.com/">splatage.com</a>
   </div>
   <!-- Copyright -->
 </footer>
