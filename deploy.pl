@@ -35,7 +35,7 @@ my $db_pass;            # From config file
 my $db_name;            # From config file
 my %User_Preferences;
 my $log_conf;           #
-
+my %ssh_master;
 
 ###########################################################
 ##   Database Connection                                 ##
@@ -732,7 +732,7 @@ sub readLog {
         return $warning;
     }
 
-    my $ssh = connectSSH( user => $user, ip => $ip );
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true' );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
@@ -894,7 +894,7 @@ sub checkIsOnline {
 
         my $ip = $enabledNodes->{$this_node}{'ip'};
 
-        my $ssh = connectSSH( user => $user, ip => $ip );
+        my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true' );
         next if $ssh->{'error'} ;
         next if $ssh->{'debug'} ;
 
@@ -1137,7 +1137,7 @@ sub getFiles {
     my $results = {};
     my %results = %$results;
 
-    my $ssh = connectSSH( user => $suser, ip => $sip );
+    my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => 'true' );
     return 1 if $ssh->{'error'};
 
 
@@ -1190,7 +1190,7 @@ sub sendCommand {
 
     $log->debug("Sending command: $command to $game on $ip");
 
-    my $ssh = connectSSH( user => $user, ip => $ip );   #or die "Error establishing SSH" ;
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true' );   #or die "Error establishing SSH" ;
 
     $ssh->{'link'}->system("screen -p 0 -S $game -X clear");
     $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
@@ -1244,8 +1244,9 @@ sub read_config_file {
 
 sub connectSSH {
     my %args = (
-        user => '',
-        ip   => '',
+        user        => '',
+        ip          => '',
+        ssh_master  => '',
         @_,    # argument pair list goes here
     );
 
@@ -1253,23 +1254,53 @@ sub connectSSH {
     $args{'ip'}   || return "Aborting SSH: must specify ip";
 
     $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
-    $args{'link'}       = Net::OpenSSH->new( $args{'connection'}, 
+    
+    
+    if ( $args{'ssh_master'} ) {
+        $log->debug("using ssh_master socket");
+        
+        $args{'link'} = $ssh_master{ $args{'user'}.$args{'ip'} };
+
+        if ( $args{'link'} ) {
+            
+            $log->debug("Master socket exists");
+            
+            if ( $args{'link'}->check_master ) {
+                $log->debug("Master socket is HEALTHY");
+                return \%args;
+            }
+        }
+        else {
+            $log->debug("Creating NEW master socket");
+            my $socket      = '.ssh_master.' . $args{'connection'};
+            
+            $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
+                batch_mode  => 1,
+                timeout     => 10,
+                ctl_dir     => '~/.ssh',
+                ctl_path    => $socket,
+                master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
+            );
+            $ssh_master{ $args{'user'}.$args{'ip'} } = $args{'link'};
+           }
+        }
+    else {
+        $log->debug("Creating TEMP socket");
+        # Use temp ssh - more stable but slower
+        my $socket      = 'master.' . $args{'connection'};
+        $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
             timeout     => 10,
             master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
         );
+   
+        if ( $args{'link'}->error ) {
+            $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
+            $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
+        };
 
-    if ( $args{'link'}->error ) {
-        $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
-        $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
-    };
-
-    unless ( $args{'link'}->check_master ) {
-        $args{'debug'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->check_master; 
-        $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->check_master);
-    };
-
-    $log->debug("SSH established " . $args{'connection'});
+        $log->debug("SSH established " . $args{'connection'});
+    }
     return \%args;
 }
 
@@ -1603,7 +1634,7 @@ sub infoNode {
     my $io_cmd  = 'iostat -h 2>&1';
     my $df_cmd  = 'df -h $(pwd) 2>&1; printf "\n\n"; df -hT --total';
     my $neo_cmd = 'neofetch --stdout 2>&1';
-    my $du_cmd  = 'echo $(pwd); du -shc * 2>&1 | sort -h';
+#    my $du_cmd  = 'echo $(pwd); du -shc * 2>&1 | sort -h';
 
     foreach my $game ( sort keys %{$game_ports} ) {
         next if ( $game_ports->{$game}{'enabled'} eq '0' );
@@ -1625,7 +1656,7 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
          Non-zero indicates problems negotiating appropriate duplex mode. 
          A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
-    my $ssh = connectSSH( user => $user, ip => $ip );
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true');
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
     
@@ -1637,7 +1668,7 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
         $output{'7_disk'}  = $ssh->{'link'}->capture($df_cmd);
         $output{'0_neo'}   = $ssh->{'link'}->capture($neo_cmd);
         $output{'4_proc'}  = $ssh->{'link'}->capture(@pid_cmd);
-        $output{'8_files'} = $ssh->{'link'}->capture($du_cmd);
+#        $output{'8_files'} = $ssh->{'link'}->capture($du_cmd);
 
     return \%output;
 }
