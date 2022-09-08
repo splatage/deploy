@@ -852,6 +852,7 @@ sub checkIsOnline {
         pid     => '',
         user    => 'minecraft',
         list_by => 'game',
+        ssh_master => '',
         @_,    # argument pair list goes here
     );
 
@@ -895,7 +896,7 @@ sub checkIsOnline {
 
         my $ip = $enabledNodes->{$this_node}{'ip'};
 
-        my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true' );
+        my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
         next if $ssh->{'error'} ;
         next if $ssh->{'debug'} ;
 
