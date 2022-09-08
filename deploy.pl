@@ -1269,9 +1269,13 @@ sub connectSSH {
             if ( $args{'link'}->check_master ) {
                 $log->debug("Master socket is HEALTHY");
                 return \%args;
+            } 
+            else {
+                $args{'link'}->disconnect();# unless $args{'link'}->check_master;
+                $args{'link'} = {};
+                $log->debug("Master socket is NOT healthy");
             }
         }
-        else {
             $log->debug("Creating NEW master socket");
             my $socket      = '.ssh_master.' . $args{'connection'};
             
@@ -1283,8 +1287,7 @@ sub connectSSH {
                 master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
             );
             $ssh_master{ $args{'user'}.$args{'ip'} } = $args{'link'};
-           }
-        }
+    }
     else {
         $log->debug("Creating TEMP socket");
         # Use temp ssh - more stable but slower
@@ -1304,6 +1307,7 @@ sub connectSSH {
     }
     return \%args;
 }
+
 
 
 
