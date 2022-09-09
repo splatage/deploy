@@ -1283,7 +1283,7 @@ sub connectSSH {
             
             $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
                 batch_mode  => 1,
-                timeout     => 10,
+                timeout     => 60,
                 ctl_dir     => '~/.ssh',
                 ctl_path    => $socket,
                 master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
@@ -1296,7 +1296,7 @@ sub connectSSH {
         my $socket      = 'master.' . $args{'connection'};
         $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
-            timeout     => 10,
+            timeout     => 60,
             master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
         );
    
