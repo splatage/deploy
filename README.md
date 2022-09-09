@@ -13,6 +13,9 @@ Requirements:
 * OpenSSH + key auth
 
 Perl modules:
+  cpan install Mojolicious
+  cpan install DBD::mysql
+  cpan install Mojo::mysql
   cpan install Mojolicious::Plugin::Authentication
   cpan install IO::Socket::SSL
   cpan install Log::Log4perl
@@ -22,7 +25,9 @@ Perl modules:
   cpan install Yancy::Plugin::Auth::Password 
   cpan install Digest::Bcrypt
   cpan install Mojo::AsyncAwait
-
+  cpan install Future::AsyncAwait 
+  
+  
 Connectivity:
   The deploy user needs SSH key access to the filestore and user@nodes.
   The filestore user also needs have SSH key access to all user and node combinations
