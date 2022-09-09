@@ -25,7 +25,10 @@ Perl modules:
   cpan install Yancy::Plugin::Auth::Password 
   cpan install Digest::Bcrypt
   cpan install Mojo::AsyncAwait
-  cpan install Future::AsyncAwait 
+  cpan install Future::AsyncAwait
+  cpan install MCE::Loop
+  cpan install MCE::Shared
+
   
   
 Connectivity:
