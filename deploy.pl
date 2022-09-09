@@ -24,6 +24,7 @@ use strict;
 use warnings;
 
 plugin 'AutoReload';
+app->secrets([rand]);
 
 ###########################################################
 ##         Declare Variables for Global Scope            ##
@@ -2156,8 +2157,8 @@ __DATA__
     <div class="row justify-content-start">
       
       
-      % my %nodes    = %$nodes;
-      % my %expected = %$expected;
+      %  %nodes    = %$nodes;
+      %  %expected = %$expected;
       % for my $node (sort keys %$nodes) {
       % if ( $nodes{$node}{'offline'} ) {
         <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">  
