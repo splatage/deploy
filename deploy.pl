@@ -1193,7 +1193,7 @@ sub sendCommand {
 
     $log->debug("Sending command: $command to $game on $ip");
 
-    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true' );   #or die "Error establishing SSH" ;
+    my $ssh = connectSSH( user => $user, ip => $ip );   #or die "Error establishing SSH" ;
 
     $ssh->{'link'}->system("screen -p 0 -S $game -X clear");
     $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
