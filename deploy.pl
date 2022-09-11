@@ -44,7 +44,8 @@ my $config = plugin Config => {
         allow_registration  => '0',
         log_level           => 'DEBUG',
         default_user        => 'minecraft',
-        use_SSH_master      => 'true',
+        ssh_master          => 'true',
+        minion_ssh_master   => '',
     },
     file => 'deploy.conf'
 };
@@ -66,6 +67,16 @@ Log::Log4perl::init( \$log_conf );
 my $log = Log::Log4perl::get_logger();
 $log->info("Hello! Starting...");
 
+# Warm up the SSH masters;
+
+checkIsOnline(
+    list_by     => 'node',
+    node        => '',
+    game        => '',
+    ssh_master  => $config->{'ssh_master'}
+    );
+
+
 ###########################################################
 ##               Configure Yancy
 ###########################################################
@@ -76,7 +87,7 @@ plugin Yancy => {
     # Read the schema configuration from the database
     read_schema => 1,
     schema      => {
-        games => {
+    games       => {
 
             # Show these columns in the Yancy editor
             'x-list-columns' =>
@@ -86,30 +97,30 @@ plugin Yancy => {
             'x-list-clomuns' => [qw( name ip enabled isGateway )],
         },
 
-        gs_plugin_settings    => { 'x-hidden' => 'true' },
-        global_settings       => { 'x-hidden' => 'true' },
-        minion_jobs_depends   => { 'x-ignore' => 'true' },
-        minion_workers_inbox  => { 'x-ignore' => 'true' },
-        mojo_pubsub_subscribe => { 'x-ignore' => 'true' },
-        isOnline              => { 'x-ignore' => 'true' },
-        users                 => {
-            'x-id-field' => 'username',
-            required     => [ 'username', 'email', 'password' ],
-            properties   => {
-                username => {
-                    type   => 'string',
+        gs_plugin_settings      => { 'x-hidden' => 'true' },
+        global_settings         => { 'x-hidden' => 'true' },
+        minion_jobs_depends     => { 'x-ignore' => 'true' },
+        minion_workers_inbox    => { 'x-ignore' => 'true' },
+        mojo_pubsub_subscribe   => { 'x-ignore' => 'true' },
+        isOnline                => { 'x-ignore' => 'true' },
+        users                   => {
+            'x-id-field'        => 'username',
+            required            => [ 'username', 'email', 'password' ],
+            properties          => {
+                username        => {
+                    type        => 'string',
                 },
-                email => {
-                    type   => 'string',
-                    format => 'email',
+                email           => {
+                    type        => 'string',
+                    format      => 'email',
                 },
-                password => {
-                    type   => 'string',
-                    format => 'password',
+                password        => {
+                    type        => 'string',
+                    format      => 'password',
                 },
-                is_admin => {
-                    type    => 'boolean',
-                    default => 0,
+                is_admin        => {
+                    type        => 'boolean',
+                    default     => 0,
                 },
             },
         },
@@ -438,7 +449,7 @@ get '/' => sub ($c) {
         list_by => 'node',
         node    => '',
         game    => '',
-        ssh_master => 'true'
+        ssh_master => $config->{'ssh_master'},
     );
 
     my $expected = readFromDB(
@@ -489,7 +500,8 @@ get '/node/:node' => sub ($c) {
     my $results = checkIsOnline(
         list_by => 'node',
         node    => $node,
-        game    => ''
+        game    => '',
+        ssh_master => $config->{'ssh_master'}
     );
 
     my $ip = readFromDB(
@@ -663,7 +675,7 @@ sub update {
     # Install Latest version
     my $user = $settings->{$game}{'node_usr'};
     
-    my $ssh = connectSSH( user => $user, ip => $ip );
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
     
@@ -730,7 +742,7 @@ sub readLog {
         return $warning;
     }
 
-    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true' );
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
@@ -834,7 +846,7 @@ sub checkIsOnline {
         game    => '',
         node    => '',
         pid     => '',
-        user    => 'minecraft',
+        user    => $config->{'default_user'},
         list_by => 'game',
         ssh_master => '',
         @_,    # argument pair list goes here
@@ -1117,7 +1129,7 @@ sub getFiles {
     my $results = {};
     my %results = %$results;
 
-    my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => 'true' );
+    my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => $args{'ssh_master'} );
     return 1 if $ssh->{'error'};
 
 
@@ -1153,7 +1165,7 @@ sub sendCommand {
     );
 
     # Order of prioroty for node:- commandline, then livegames then DB
-    $node = checkIsOnline( list_by => 'node', node => '', game => $game ) unless $node;
+    $node = checkIsOnline( list_by => 'node', node => '', game => $game, ssh_master => $args{'ssh_master'} ) unless $node;
     $node = $settings->{$game}{'node'} unless $node;
 
     my $ip = readFromDB(
@@ -1169,7 +1181,7 @@ sub sendCommand {
 
     $log->debug("Sending command: $command to $game on $ip");
 
-    my $ssh = connectSSH( user => $user, ip => $ip );   #or die "Error establishing SSH" ;
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );   #or die "Error establishing SSH" ;
 
     $ssh->{'link'}->system("screen -p 0 -S $game -X clear");
     $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
@@ -1285,7 +1297,7 @@ sub haltGame {
 
     sleep(30);
 
-    unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) ) {
+    unless ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
         $log->info("Halt $game succeeded");
         return "Halt $game succeeded";
     }
@@ -1352,7 +1364,7 @@ sub storeGame {
     $error .= "before attempting a sync to the primary data store location";
 
     return $error
-      unless ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+      unless ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) );
 
     my $settings = readFromDB(
         table    => 'games',
@@ -1395,7 +1407,7 @@ sub storeGame {
 
     $log->debug(" $cp_from $cp_to ");
 
-    my $ssh = connectSSH( user => $suser, ip => $sip );
+    my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
@@ -1423,7 +1435,7 @@ sub bootGame {
     my ( $user, $suser, $cp_to, $cp_from );
 
     return "$game is already online"
-      if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+      if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) );
 
     my $settings = readFromDB(
         table    => 'games',
@@ -1460,7 +1472,7 @@ sub bootGame {
     $log->trace("$invocation");
     $user = $settings->{$game}{'node_usr'};
 
-    my $ssh = connectSSH( user => $user, ip => $ip );
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
     
@@ -1468,7 +1480,7 @@ sub bootGame {
 
     sleep(10);
 
-    if ( checkIsOnline( list_by => 'game', node => '', game => $game ) ) {
+    if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
         $log->info("Started $game");
         return 0;
     }
@@ -1493,7 +1505,7 @@ sub deployGame {
     $error .= "It would be unsafe to deloy overtop of a running game. ";
 
     return $error
-      if ( checkIsOnline( list_by => 'game', node => '', game => $game ) );
+      if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) );
 
     my $settings = readFromDB(
         table    => 'games',
@@ -1539,7 +1551,7 @@ sub deployGame {
        $rsync_cmd .= "-o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
     $log->debug(" $rsync_cmd ");
 
-    my $ssh = connectSSH( user => $suser, ip => $sip );
+    my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
     
@@ -1551,7 +1563,7 @@ sub deployGame {
 sub infoNode {
     my %args = (
         node => '',
-        user => 'minecraft',
+        user => $config->{'default_user'},
         @_,    # argument pair list goes here
     );
 
@@ -1611,7 +1623,7 @@ collsns	Number of collisions, which should always be zero on a switched LAN.
          Non-zero indicates problems negotiating appropriate duplex mode. 
          A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
-    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => 'true');
+    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
     
