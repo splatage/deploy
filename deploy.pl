@@ -16,11 +16,11 @@ use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
 use Log::Log4perl;
-#use File::Basename;
 use strict;
 use warnings;
 
 plugin 'AutoReload';
+plugin 'StaticCompressor';
 app->secrets([rand]);
 
 
@@ -68,13 +68,6 @@ my $log = Log::Log4perl::get_logger();
 $log->info("Hello! Starting...");
 
 # Warm up the SSH masters;
-
-checkIsOnline(
-    list_by     => 'node',
-    node        => '',
-    game        => '',
-    ssh_master  => $config->{'ssh_master'}
-    );
 
 
 ###########################################################
@@ -1220,41 +1213,38 @@ sub connectSSH {
     $args{'ip'}   || return "Aborting SSH: must specify ip";
 
     $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
-    
-    
-    if ( $args{'ssh_master'} ) {
-        $log->debug("using ssh_master socket");
-        
-        $args{'link'} = $ssh_master{ $args{'user'}.$args{'ip'} };
+    $args{'link'}       = $ssh_master{ $args{'user'}.$args{'ip'} };
 
-        if ( $args{'link'} ) {
-            
-            $log->debug("Master socket exists");
-            
-            if ( $args{'link'}->check_master ) {
-                $log->debug("Master socket is HEALTHY");
-                return \%args;
-            } 
-            else {
-                $args{'link'}->disconnect();# unless $args{'link'}->check_master;
-                $args{'link'} = {};
-                $log->debug("Master socket is NOT healthy");
-            }
+    if ( defined( $args{'ssh_master'} ) && defined( $args{'link'} ) ) {
+        $log->debug("Master socket exists");
+        
+        if ( $args{'link'}->check_master ) {
+            $log->debug("Master socket is HEALTHY");
+            return \%args;
         }
-            $log->debug("Creating NEW master socket");
-            my $socket      = '.ssh_master.' . $args{'connection'};
-            
-            $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
-                batch_mode  => 1,
-                timeout     => 60,
-                ctl_dir     => '~/.ssh',
-                ctl_path    => $socket,
-                master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
-            );
-            $ssh_master{ $args{'user'}.$args{'ip'} } = $args{'link'};
+        else {
+            $args{'link'}->disconnect();
+            $args{'link'} = {};
+        }
     }
-    else {
-        $log->debug("Creating TEMP socket");
+    
+    if ( defined( $args{'ssh_master'} )  eq 'true' && not defined( $args{'link'} ) ) {
+        $log->debug("Creating NEW SSH master socket");
+
+        my $socket      = '.ssh_master.' . $args{'connection'};
+        $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
+            batch_mode  => 1,
+            timeout     => 60,
+            async       => 1,
+            ctl_path    => $socket,
+            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
+        );
+
+        $ssh_master{ $args{'user'}.$args{'ip'} } = $args{'link'};
+    }
+        
+    if ( not defined( $args{'ssh_master'} ) ) {
+        $log->debug("Creating TEMP SSH socket");
         # Use temp ssh - more stable but slower
         my $socket      = 'master.' . $args{'connection'};
         $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
@@ -1262,15 +1252,17 @@ sub connectSSH {
             timeout     => 60,
             master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
         );
-   
-        if ( $args{'link'}->error ) {
-            $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
-            $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
-        };
-
-        $log->debug("SSH established " . $args{'connection'});
     }
-    return \%args;
+
+    if ( $args{'link'}->error ) {
+        $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
+        $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
+        $args{'link'} = undef;
+    }
+    else {
+        $log->debug("SSH established " . $args{'connection'});
+        return \%args;
+    }
 }
 
 
@@ -1285,13 +1277,6 @@ sub haltGame {
     my $node = $args{'node'};
 
     $log->info("Halting: $game");
-
-   #    sendCommand( "servermanager kick $game^Mco purge t:90d", $gatewayName );
-   #    deregisterGame( game => $game );
-
-    #    sleep(2);
-
-    #    storeGame( game => $game );
 
     sendCommand( command => "stop^Mend", game => $game, node => $node );
 
@@ -1400,6 +1385,15 @@ sub storeGame {
         return "Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip";
     }
 
+    sendCommand( 
+        command => 'say Backup starting...^Msave-off^Msave-all', 
+        game    => $game, 
+        node    => $settings->{$game}{'node'},
+        ip      => $ip
+    );
+    
+    sleep(0.5);
+
     $cp_from = $user . "@" . $ip . ":";
     $cp_from .= $settings->{$game}{"node_path"} . "/" . $game;
 
@@ -1418,7 +1412,22 @@ sub storeGame {
       $ssh->{'link'}->capture(
 "rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
       );
+      
+    sendCommand( 
+        command => "say Backup complete^Msave-on", 
+        game    => $game, 
+        node    => $settings->{$game}{'node'},
+        ip      => $ip
+    );
 
+    sendCommand( 
+        command => "co purge t:30d", 
+        game    => $game, 
+        node    => $settings->{$game}{'node'},
+        ip      => $ip
+    );
+    sleep(0.5);
+    
     return $output;
 }
 
