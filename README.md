@@ -14,9 +14,10 @@ Requirements:
 
 Perl modules:
   cpan install Mojolicious
+  cpan install Mojolicious::Plugin::Config 
+  cpan install Mojolicious::Plugin::Authentication
   cpan install DBD::mysql
   cpan install Mojo::mysql
-  cpan install Mojolicious::Plugin::Authentication
   cpan install IO::Socket::SSL
   cpan install Log::Log4perl
   cpan install Crypt::PBKDF2
