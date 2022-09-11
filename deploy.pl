@@ -16,8 +16,7 @@ use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
 use Log::Log4perl;
-use File::Basename;
-use lib dirname(__FILE__) . "/lib/Game";
+#use File::Basename;
 use strict;
 use warnings;
 
@@ -29,36 +28,37 @@ app->secrets([rand]);
 ##         Declare Variables for Global Scope            ##
 ###########################################################
 
-my $db_host;            # From config file
-my $db_user;            # From config file
-my $db_pass;            # From config file
-my $db_name;            # From config file
-my %User_Preferences;
-my $log_conf;           #
+my $log_conf;
 my %ssh_master;
 
 ###########################################################
 ##   Database Connection                                 ##
 ###########################################################
 
-read_config_file('config/deploy.cfg');
-
 my $config = plugin Config => {
     default => {
-        db_host => '127.0.0.1',
-        db_user => 'DB_username',
-        db_pass => 'DB_password',
-        db_name => 'DB_name'
+        db_host             => '127.0.0.1',
+        db_user             => 'DB_username',
+        db_pass             => 'DB_password',
+        db_name             => 'DB_name',
+        allow_registration  => '0',
+        log_level           => 'DEBUG',
+        default_user        => 'minecraft',
+        use_SSH_master      => 'true',
     },
     file => 'deploy.conf'
 };
 
-my $db_string = "mysql://" . $db_user . ":" . $db_pass . "@" . $db_host . "/" . $db_name;
+
+my $db_string = "mysql://" 
+    . $config->{'db_user'} 
+    . ":" . $config->{'db_pass'} 
+    . "@" . $config->{'db_host'} 
+    . "/" . $config->{'db_name'};
+
 my $db = Mojo::mysql->strict_mode($db_string);
 
 plugin Minion => { mysql => "$db_string" };
-
-## Logging
 
 configLogger();
 Log::Log4perl::init( \$log_conf );
@@ -150,7 +150,7 @@ app->sessions->default_expiration( 1 * 60 * 60 );
 app->yancy->plugin(
     'Auth::Password' => {
         schema          => 'users',
-        allow_register  => 0,
+        allow_register  => $config->{'allow_registration'},
         username_field  => 'username',
         email_filed     => 'email',
         password_field  => 'password',
@@ -775,19 +775,18 @@ sub readFromDB {
 
     $log->debug("sub readFromDB: Connecting to DB table:$table column:$column field:$field value:$value" );
 
-    my $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
-            "$db_user", "$db_pass", { 'RaiseError' => 1 } );
+    my $dbh = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
+            "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1 } );
 
-      
     my ( $ref, $ref_name, $ref_value );
     my $result = {};
     my %result = %$result;
    
-    unless ( $dbh->ping ) {
-        $log->info("No connection to DB...reconnecting");
-        $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
-            "$db_user", "$db_pass", { 'RaiseError' => 1 } );
-    }
+#    unless ( $dbh->ping ) {
+#        $log->info("No connection to DB...reconnecting");
+#        $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
+#            "$db_user", "$db_pass", { 'RaiseError' => 1 } );
+#    }
 
     my $select = '*';
     $select = $column if ( $args{'hash_ref'} eq 'false' );
@@ -1197,31 +1196,6 @@ sub sendCommand {
 }
 
 
-sub read_config_file {
-    my ($configfile) = $_[0];
-
-    my $CONFIG;
-    open( $CONFIG, '<', $configfile ) or croak "[!!] $configfile doesn't exist";
-
-    while (<$CONFIG>) {
-        chomp;                 # no newline
-        s/#.*//;               # no comments
-        s/^\s+//;              # no leading white
-        s/\s+$//;              # no trailing white
-        next unless length;    # anything left?
-        my ( $var, $value ) = split( /\s*=\s*/, $_, 2 );
-        $User_Preferences{$var} = $value;
-    }
-
-    close($CONFIG);
-
-    $db_host = $User_Preferences{'db_host'};
-    $db_user = $User_Preferences{'db_user'};
-    $db_pass = $User_Preferences{'db_pass'};
-    $db_name = $User_Preferences{'db_name'};
-}
-
-
 sub connectSSH {
     my %args = (
         user        => '',
@@ -1323,8 +1297,8 @@ sub haltGame {
 
 sub configLogger {
 
-    $log_conf = q{
-        log4perl.category                   = DEBUG, Logfile, Screen, DBAppndr
+    $log_conf = qq{
+        log4perl.category                   = $config->{'log_level'}, Logfile, Screen, DBAppndr
 
  
         log4perl.appender.Logfile           = Log::Log4perl::Appender::File
@@ -1341,10 +1315,10 @@ sub configLogger {
     };
 
     $log_conf .=
-      "log4perl.appender.DBAppndr.datasource = DBI:mysql:database=$db_name\n";
-    $log_conf .= "mc_control;host=$db_host;port=3306\n";
-    $log_conf .= "log4perl.appender.DBAppndr.username   = $db_user\n";
-    $log_conf .= "log4perl.appender.DBAppndr.password   = $db_pass\n";
+      "log4perl.appender.DBAppndr.datasource = DBI:mysql:database=$config->{'db_name'}\n";
+    $log_conf .= "mc_control;host=$config->{'db_host'};port=3306\n";
+    $log_conf .= "log4perl.appender.DBAppndr.username   = $config->{'db_user'}\n";
+    $log_conf .= "log4perl.appender.DBAppndr.password   = $config->{'db_pass'}\n";
 
     $log_conf .= q{
         log4perl.appender.DBAppndr.sql        = \
