@@ -31,6 +31,7 @@ app->secrets([rand]);
 my $log_conf;
 my %ssh_master;
 
+
 ###########################################################
 ##   Database Connection                                 ##
 ###########################################################
@@ -68,6 +69,14 @@ my $log = Log::Log4perl::get_logger();
 $log->info("Hello! Starting...");
 
 # Warm up the SSH masters;
+
+
+#checkIsOnline(
+#    list_by => 'node',
+#    node    => '',
+#    game    => '',
+#    ssh_master => $config->{'ssh_master'},
+#);
 
 
 ###########################################################
@@ -1209,17 +1218,19 @@ sub connectSSH {
         @_,    # argument pair list goes here
     );
 
+    my $PID = $$;
+
     $args{'user'} || return "Aborting SSH: must specify username";
     $args{'ip'}   || return "Aborting SSH: must specify ip";
 
     $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
-    $args{'link'}       = $ssh_master{ $args{'user'}.$args{'ip'} };
+    $args{'link'}       = $ssh_master{ $PID.$args{'user'}.$args{'ip'} };
 
     if ( defined( $args{'ssh_master'} ) && defined( $args{'link'} ) ) {
-        $log->debug("Master socket exists");
+        $log->debug("Master socket exists $PID.$args{'user'}.$args{'ip'}");
         
         if ( $args{'link'}->check_master ) {
-            $log->debug("Master socket is HEALTHY");
+            $log->debug("Master socket is HEALTHY $PID.$args{'user'}.$args{'ip'}");
             return \%args;
         }
         else {
@@ -1228,10 +1239,10 @@ sub connectSSH {
         }
     }
     
-    if ( defined( $args{'ssh_master'} )  eq 'true' && not defined( $args{'link'} ) ) {
-        $log->debug("Creating NEW SSH master socket");
+    if ( defined( $args{'ssh_master'} ) && not defined( $args{'link'} ) ) {
+        $log->debug("Creating NEW SSH master socket $PID.$args{'user'}.$args{'ip'}");
 
-        my $socket      = '.ssh_master.' . $args{'connection'};
+        my $socket      = '.ssh_master.' . $args{'connection'} . "_" . $PID;
         $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
             timeout     => 60,
@@ -1240,13 +1251,13 @@ sub connectSSH {
             master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
         );
 
-        $ssh_master{ $args{'user'}.$args{'ip'} } = $args{'link'};
+        $ssh_master{ $PID.$args{'user'}.$args{'ip'} } = $args{'link'};
     }
         
     if ( not defined( $args{'ssh_master'} ) ) {
         $log->debug("Creating TEMP SSH socket");
         # Use temp ssh - more stable but slower
-        my $socket      = 'master.' . $args{'connection'};
+        my $socket      = '.ssh_master.' . $args{'connection'} . "_" . $PID;
         $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
             timeout     => 60,
