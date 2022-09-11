@@ -3,21 +3,19 @@ use v5.28;
 use Mojolicious::Lite -signatures, -async_await;
 use Mojo::AsyncAwait;
 use Mojo::mysql;
+use DBD::mysql;
+use DBI;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
 use IO::Socket::SSL;
 use Minion;
 use Net::OpenSSH;
-use DBD::MariaDB;
-use DBI;
 use Carp         qw( croak );
 use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
-# use Net::Ping;
 use Log::Log4perl;
-use Crypt::PBKDF2;
 use File::Basename;
 use lib dirname(__FILE__) . "/lib/Game";
 use strict;
@@ -25,6 +23,7 @@ use warnings;
 
 plugin 'AutoReload';
 app->secrets([rand]);
+
 
 ###########################################################
 ##         Declare Variables for Global Scope            ##
@@ -43,6 +42,16 @@ my %ssh_master;
 ###########################################################
 
 read_config_file('config/deploy.cfg');
+
+my $config = plugin Config => {
+    default => {
+        db_host => '127.0.0.1',
+        db_user => 'DB_username',
+        db_pass => 'DB_password',
+        db_name => 'DB_name'
+    },
+    file => 'deploy.conf'
+};
 
 my $db_string = "mysql://" . $db_user . ":" . $db_pass . "@" . $db_host . "/" . $db_name;
 my $db = Mojo::mysql->strict_mode($db_string);
@@ -84,9 +93,12 @@ plugin Yancy => {
         mojo_pubsub_subscribe => { 'x-ignore' => 'true' },
         isOnline              => { 'x-ignore' => 'true' },
         users                 => {
-            'x-id-field' => 'email',
-            required     => [ 'email', 'password' ],
+            'x-id-field' => 'username',
+            required     => [ 'username', 'email', 'password' ],
             properties   => {
+                username => {
+                    type   => 'string',
+                },
                 email => {
                     type   => 'string',
                     format => 'email',
@@ -101,7 +113,6 @@ plugin Yancy => {
                 },
             },
         },
-
     },
     editor => {
         require_user => { is_admin => 1 },
@@ -133,22 +144,18 @@ foreach my $game (keys %{$settings}) {
 ###########################################################
 ##    Authentication
 ###########################################################
-#app->renderer->cache->max_keys(0);
+
 app->sessions->default_expiration( 1 * 60 * 60 );
 
-# my $salt = pack "A16", map { int( 128 * rand() + 24 ) } 0 .. 100;
-# my $salt = map { print chr int rand(128) + 24 } 1 .. 15;
 app->yancy->plugin(
     'Auth::Password' => {
         schema          => 'users',
         allow_register  => 0,
-        username_field  => 'email',
+        username_field  => 'username',
+        email_filed     => 'email',
         password_field  => 'password',
         password_digest => {
-            type => 'SHA-256'
-#            type => 'Bcrypt',
-#            cost => 12,
-#            salt => $salt
+            type => 'SHA-512'
         }
     }
 );
@@ -199,7 +206,6 @@ get '/update/:game/:node' => sub ($c) {
     my $game = $c->stash('game');
     my $node = $c->stash('node');
 
-    # $c->minion->enqueue($task => [$game],{queue => $game});
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
@@ -231,7 +237,6 @@ get '/boot/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
 
-    # $c->minion->enqueue($task => [$game],{queue => $game});
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
 
     $c->flash( message => "sending minions to $task $game on $node " );
@@ -275,7 +280,6 @@ get '/halt/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
 
-    # $c->minion->enqueue($task => [$game],{queue => $game});
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
@@ -309,7 +313,6 @@ get '/deploy/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
 
-    # $c->minion->enqueue($task => [$game],{queue => $game});
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
@@ -341,7 +344,6 @@ get '/store/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
 
-    # $c->minion->enqueue($task => [$game],{queue => $game});
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
@@ -374,7 +376,6 @@ get '/link/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
 
-    # $c->minion->enqueue($task => [$game],{queue => $game});
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
@@ -405,7 +406,6 @@ get '/drop/:game/:node' => sub ($c) {
     my $node = $c->stash('node');
     my $game = $c->stash('game');
 
-    # $c->minion->enqueue($task => [$game],{queue => $game});
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120  } );
     $c->flash( message => "sending minions to $task $game on $node " );
     $c->redirect_to("/node/$node");
@@ -433,9 +433,7 @@ app->minion->add_task(
 ###########################################################
 
 get '/' => sub ($c) {
-    #
 
-    #
     my $results = checkIsOnline(
         list_by => 'node',
         node    => '',
@@ -596,8 +594,6 @@ get '/move/:node/:game' => sub ($c) {
 };
 
 any '*' => sub ($c) {
-
-    #$c->render(template => 'login') };
     $c->flash( error => "page doesn't exist" );
     $c->redirect_to("/");
 };
@@ -779,7 +775,7 @@ sub readFromDB {
 
     $log->debug("sub readFromDB: Connecting to DB table:$table column:$column field:$field value:$value" );
 
-    my $dbh = DBI->connect( "DBI:MariaDB:database=$db_name;host=$db_host",
+    my $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
             "$db_user", "$db_pass", { 'RaiseError' => 1 } );
 
       
@@ -789,7 +785,7 @@ sub readFromDB {
    
     unless ( $dbh->ping ) {
         $log->info("No connection to DB...reconnecting");
-        $dbh = DBI->connect( "DBI:MariaDB:database=$db_name;host=$db_host",
+        $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
             "$db_user", "$db_pass", { 'RaiseError' => 1 } );
     }
 
@@ -805,22 +801,9 @@ sub readFromDB {
     $query .= ";";
     $log->debug("$query");
 
-    my $sth = $dbh->prepare($query, { mariadb_async => 1 });
+    my $sth = $dbh->prepare($query);
     $sth->execute(); 
-    
-    my $count = 0;
-    until($sth->mariadb_async_ready) {
-        sleep 0.02;
-        $count += 0.02;
-        if ( $count >= 5 ) {
-            $sth->finish();
-            $dbh->disconnect;
-            $log->debug("DB timedout after $count seconds");
-            return "DB timedout after $count seconds";
-        }
-    }
 
-    $sth->mariadb_async_result();
     while ( $ref = $sth->fetchrow_hashref() ) {
         my $index_name;
         $index_name = $column unless $index_name = $ref->{$column};
@@ -834,7 +817,8 @@ sub readFromDB {
 
     $sth->finish();
     $dbh->disconnect;
-    $log->debug("DB free after $count seconds");
+#    $log->debug("DB free after $count seconds");
+    $log->debug("DB query complete");
         
     if ( $args{'hash_ref'} eq 'true' ) {
         return \%result;
@@ -876,9 +860,6 @@ sub checkIsOnline {
     my $list_by     = $args{'list_by'};
     my $user        = $args{'user'};
 
-#    my $t_shoot = Dumper(\%args);
-#    $log->debug("$t_shoot");
-
     if ( $args{'node'} ) {
         @nodes_to_check = $args{'node'};
         $log->debug("Using specified node");
@@ -901,11 +882,8 @@ sub checkIsOnline {
         next if $ssh->{'error'} ;
         next if $ssh->{'debug'} ;
 
-
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
         my $screen_list = $ssh->{'link'}->capture("@cmd");
-
-        #$log->debug("$screen_list");
 
         my @screen_list = split( '\n', $screen_list );
 
@@ -1153,7 +1131,6 @@ sub getFiles {
     return \@files;
 }
 
-# s command => 'say hello', game => 'benchmark', node => '' );
 
 sub sendCommand {
     my %args = (
@@ -1311,9 +1288,6 @@ sub connectSSH {
 }
 
 
-
-
-# haltGame(game => 'benchmark');
 sub haltGame {
     my %args = (
         game => '',
@@ -1386,7 +1360,7 @@ sub configLogger {
     };
 }
 
-# storeGame('benchmark');
+
 sub storeGame {
     my %args = (
         game => '',
@@ -1462,7 +1436,7 @@ sub storeGame {
     return $output;
 }
 
-# bootGame('benchmark');
+
 sub bootGame {
     my %args = (
         game       => '',
@@ -1530,7 +1504,7 @@ sub bootGame {
     }
 }
 
-#deployGame('benchmark');
+
 sub deployGame {
     my %args = (
         game => '',
@@ -1599,7 +1573,7 @@ sub deployGame {
     return $output;
 }
 
-#infoNode( node => 'node5' );
+
 sub infoNode {
     my %args = (
         node => '',
