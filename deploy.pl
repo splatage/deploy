@@ -2071,9 +2071,9 @@ __DATA__
       % for my $node (sort keys %$nodes) {
       % if ( ! $nodes{$node}{'offline'} ) {
 
-        <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">  
+        <div class="col-12 col-md-3 shadow bg-medium mt-4 mb-2 rounded">  
      
-          <div class="media mt-2">
+          <div class="media mt-2 mb-2">
 
             <img class="align-self-top mr-1 mt-2 mb-2" 
               src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
