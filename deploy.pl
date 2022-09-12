@@ -29,7 +29,7 @@ app->secrets([rand]);
 
 my $log_conf;
 my %ssh_master;
-my $dbh;
+#my $dbh;
 
 
 ###########################################################
@@ -771,6 +771,7 @@ sub readFromDB {
     return 0 if not $args{'table'};
     return 0 if not $args{'column'};
 
+    my $dbh;
     my $table  = $args{'table'};
     my $column = $args{'column'};
     my $field  = $args{'field'};
@@ -828,7 +829,7 @@ sub readFromDB {
     }
 
     $sth->finish();
-#    $dbh->disconnect;
+    $dbh->disconnect;
 #    $log->debug("DB free after $count seconds");
     $log->debug("DB query complete");
         
