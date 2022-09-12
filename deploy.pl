@@ -68,8 +68,6 @@ Log::Log4perl::init( \$log_conf );
 my $log = Log::Log4perl::get_logger();
 $log->info("Hello! Starting...");
 
-# Warm up the SSH masters;
-
 
 #checkIsOnline(
 #    list_by => 'node',
