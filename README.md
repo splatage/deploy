@@ -12,6 +12,9 @@ Requirements:
 * mysql/mariadb
 * OpenSSH + key auth
 
+Install schema:
+$ mysql -u username -p db_name < schema.sql
+
 Perl modules:
   cpan install Mojolicious
   cpan install Mojolicious::Plugin::Config 
