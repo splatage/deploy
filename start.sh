@@ -1,7 +1,5 @@
 #!/bin/bash
 
-
-
 function start () {
     screen -h 1024 -L -dmS mojo   perl deploy.pl prefork -m production -l http://*:3000
 #    hypnotoad deploy.pl 
