@@ -80,15 +80,13 @@ plugin Yancy => {
     read_schema => 1,
     schema      => {
     games       => {
-
             # Show these columns in the Yancy editor
             'x-list-columns' =>
-              [qw( name node release port mem_max store enabled isBungee )],
+            [qw( name node release port mem_max store enabled isBungee )],
         },
         nodes => {
             'x-list-clomuns' => [qw( name ip enabled isGateway )],
         },
-
         gs_plugin_settings      => { 'x-hidden' => 'true' },
         global_settings         => { 'x-hidden' => 'true' },
         minion_jobs_depends     => { 'x-ignore' => 'true' },
