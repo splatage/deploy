@@ -1694,6 +1694,12 @@ __DATA__
     width: 78px !important;
     margin-right: 3px;
     }
+    #top-alert {
+        position: fixed;
+        top: 0;
+        right: 0;
+        z-index: 99999;
+    }
     .data a, .data span, .data tr, .data td { white-space: pre; }
   </style>
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
@@ -1708,7 +1714,27 @@ __DATA__
   </symbol>
 </svg>
  
-<nav class="navbar navbar-expand-lg sticky-top navbar-dark bg-dark">
+    % my $flash_message = $c->flash('message');
+    % if ($flash_message) {
+    <div id="top-alert" class="alert alert-primary alert-dismissible" role="alert">
+        <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <%= $flash_message %>
+    </div>
+    % }
+
+
+    % my $flash_error = $c->flash('error');
+    % if ($flash_error) {
+    <div id="top-alert" class="alert alert-danger alert-dismissible" role="alert">
+        <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <%= $flash_error %>
+    </div>
+    % }
+
+
+<nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark">
   <div class="container-fluid">
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01" 
         aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
@@ -1752,30 +1778,6 @@ __DATA__
         
         </li>
             % }
-
-    % my $flash_message = $c->flash('message');
-    % if ($flash_message) {
-    <li class="nav-item">
-      <div class="alert alert-primary d-flex align-items-center alert-dismissible fade show" role="alert">
-        <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
-        <div>
-          <%= $flash_message %>
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-      </div>  
-    % }
-    % my $flash_error = $c->flash('error');
-    % if ($flash_error) {
-      <div class="alert alert-danger d-flex align-items-center alert-dismissible fade show" role="alert">
-        <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
-        <div>
-          <%= $flash_error %>
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-      </div>  
-              </li>
-      
-    % }
     </ul>
     </div>
   </div>
