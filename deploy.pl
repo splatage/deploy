@@ -46,7 +46,7 @@ my $config = plugin Config => {
         log_level           => 'DEBUG',
         default_user        => 'minecraft',
         ssh_master          => 'true',
-        minion_ssh_master   => '',
+        minion_ssh_master   => 'false',
     },
     file => 'deploy.conf'
 };
@@ -67,14 +67,6 @@ Log::Log4perl::init( \$log_conf );
 
 my $log = Log::Log4perl::get_logger();
 $log->info("Hello! Starting...");
-
-
-#checkIsOnline(
-#    list_by => 'node',
-#    node    => '',
-#    game    => '',
-#    ssh_master => $config->{'ssh_master'},
-#);
 
 
 ###########################################################
@@ -260,16 +252,16 @@ app->minion->add_task(
         return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 300 );
 
-        my $deploy = deployGame( game => $game );
+        my $deploy = deployGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( deploy => "$game $deploy" );
 
-        my $update = update( game => $game );
+        my $update = update( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( update => "$game $update" );
 
-        my $boot = bootGame( game => $game, server_bin => $update );
+        my $boot = bootGame( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( boot => "$game $boot" );
 
-        my $regist = registerGame( game => $game );
+        my $regist = registerGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( register => "$game $regist" );
 
         $job->app->log->info("$task $game completed");
@@ -304,9 +296,9 @@ app->minion->add_task(
 
         $job->app->log->info("Job: $task $game begins");
 
-        my $store = storeGame( game => $game );
+        my $store = storeGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( store => "$game $store" );
-        my $halt = haltGame( game => $game );
+        my $halt = haltGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( halt => "$game $halt" );
 
         $job->app->log->info("$task $game completed");
@@ -337,7 +329,7 @@ app->minion->add_task(
 
         $job->app->log->info("Job: $task $game begins");
 
-        my $output = deployGame( game => $game );
+        my $output = deployGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( deploy => "$game $output" );
 
         $job->app->log->info("$task $game completed");
@@ -369,7 +361,7 @@ app->minion->add_task(
 
         $job->app->log->info("Job: $task $game begins");
 
-        my $output = storeGame( game => $game );
+        my $output = storeGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( store => "$game $output" );
 
         $job->app->log->info("$task $game completed");
@@ -400,7 +392,7 @@ app->minion->add_task(
 
         $job->app->log->info("Job: $task $game begins");
 
-        my $output = registerGame( game => $game );
+        my $output = registerGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( register => "$game $output" );
 
         $job->app->log->info("$task $game completed");
@@ -430,7 +422,7 @@ app->minion->add_task(
 
         $job->app->log->info("Job: $task $game begins");
 
-        my $output = deregisterGame( game => $game );
+        my $output = deregisterGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( deregister => "$game $output" );
 
         $job->app->log->info("$task $game completed");
@@ -1035,7 +1027,7 @@ sub registerGame {
 
     $cmd = "servermanager delete " . $game . "^M";
 
-    sendCommand( command => $cmd, game => $gateway, node => $node );
+    sendCommand( command => $cmd, game => $gateway, node => $node, ssh_master  => $args{'ssh_master'} );
     sleep(0.5);
 
     if ( $settings->{$game}{'isLobby'} eq '1' ) {
@@ -1058,7 +1050,7 @@ sub registerGame {
     $cmd .= $islobby . " true ";
     $cmd .= $isrestricted . " " . $game;
 
-    sendCommand( command => $cmd, game => $gateway, node => $node );
+    sendCommand( command => $cmd, game => $gateway, node => $node, ssh_master  => $args{'ssh_master'} );
     sleep(0.5);
 
     return "$game linked to $gateway network - $cmd";
@@ -1101,7 +1093,7 @@ sub deregisterGame {
 
     $cmd = "servermanager delete " . $game . "^M";
 
-    sendCommand( command => $cmd, game => $gateway, node => $node );
+    sendCommand( command => $cmd, game => $gateway, node => $node, ssh_master  => $args{'ssh_master'} );
 }
 
 # getFiles(game => 'benchmark');
@@ -1156,10 +1148,11 @@ sub getFiles {
 
 sub sendCommand {
     my %args = (
-        game    => '',
-        command => '',
-        node    => '',
-        ip      => '',
+        game        => '',
+        command     => '',
+        node        => '',
+        ip          => '',
+        ssh_master  => '',
         @_,
     );
 
@@ -1235,7 +1228,7 @@ sub connectSSH {
     $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
     $args{'link'}       = $ssh_master{ $PID.$args{'user'}.$args{'ip'} };
 
-    if ( defined( $args{'ssh_master'} ) && defined( $args{'link'} ) ) {
+    if ( $args{'ssh_master'} eq 'true' && defined( $args{'link'} ) ) {
         $log->debug("Master socket exists $PID.$args{'user'}.$args{'ip'}");
         
         if ( $args{'link'}->check_master ) {
@@ -1248,7 +1241,7 @@ sub connectSSH {
         }
     }
     
-    if ( defined( $args{'ssh_master'} ) && not defined( $args{'link'} ) ) {
+    if ( $args{'ssh_master'} eq 'true' && not defined( $args{'link'} ) ) {
         $log->debug("Creating NEW SSH master socket $PID.$args{'user'}.$args{'ip'}");
 
         my $socket      = '.ssh_master.' . $args{'connection'} . "_" . $PID;
@@ -1263,7 +1256,7 @@ sub connectSSH {
         $ssh_master{ $PID.$args{'user'}.$args{'ip'} } = $args{'link'};
     }
         
-    if ( not defined( $args{'ssh_master'} ) ) {
+    if ( $args{'ssh_master'} ne 'true' ) {
         $log->debug("Creating TEMP SSH socket");
         # Use temp ssh - more stable but slower
         my $socket      = '.ssh_master.' . $args{'connection'} . "_" . $PID;
@@ -1298,7 +1291,7 @@ sub haltGame {
 
     $log->info("Halting: $game");
 
-    sendCommand( command => "stop^Mend", game => $game, node => $node );
+    sendCommand( command => "stop^Mend", game => $game, node => $node, ssh_master => $args{'ssh_master'} );
 
     sleep(30);
 
@@ -1406,10 +1399,11 @@ sub storeGame {
     }
 
     sendCommand( 
-        command => 'say Backup starting...^Msave-off^Msave-all', 
-        game    => $game, 
-        node    => $settings->{$game}{'node'},
-        ip      => $ip
+        command     => 'say Backup starting...^Msave-off^Msave-all', 
+        game        => $game, 
+        node        => $settings->{$game}{'node'},
+        ip          => $ip,
+        ssh_master  => $args{'ssh_master'}
     );
     
     sleep(0.5);
@@ -1434,17 +1428,19 @@ sub storeGame {
       );
       
     sendCommand( 
-        command => "say Backup complete^Msave-on", 
-        game    => $game, 
-        node    => $settings->{$game}{'node'},
-        ip      => $ip
+        command     => "say Backup complete^Msave-on", 
+        game        => $game, 
+        node        => $settings->{$game}{'node'},
+        ip          => $ip,
+        ssh_master  => $args{'ssh_master'}
     );
 
     sendCommand( 
-        command => "co purge t:30d", 
-        game    => $game, 
-        node    => $settings->{$game}{'node'},
-        ip      => $ip
+        command     => "co purge t:30d", 
+        game        => $game, 
+        node        => $settings->{$game}{'node'},
+        ip          => $ip,
+        ssh_master  => $args{'ssh_master'}
     );
     sleep(0.5);
     
@@ -1685,7 +1681,7 @@ __DATA__
 </head>
 
 </div>
-<body>
+<body class="d-flex flex-column min-vh-100">
   <style>
     body  {
         background-image: url("http://www.splatage.com/wp-content/uploads/2021/06/download-wallpaper-x-minecraft-backgroung-green-full-hd-p-hd-background-1478263362k8n4g.jpg");
@@ -1793,7 +1789,7 @@ __DATA__
   </div>
   
   
-<footer class="bg-dark text-center text-white">
+<footer class="bg-dark text-center text-white mt-auto">
   <!-- Grid container -->
   <div class="container p-4 pb-0">
     <!-- Section: Social media -->
