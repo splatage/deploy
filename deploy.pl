@@ -489,7 +489,7 @@ get '/info/:node/' => sub ($c) {
 
     my $node = $c->stash('node');
 
-    my $results = infoNode( node => $node );
+    my $results = infoNode( node => $node, ssh_master => $config->{'ssh_master'} );
 
     $c->stash( results => $results );
     $c->render( template => 'node_details', results => $results );
@@ -2414,3 +2414,4 @@ pre {
 </div>
 </body>
 </html>
+

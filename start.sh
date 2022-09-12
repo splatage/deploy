@@ -4,7 +4,7 @@
 
 function start () {
     screen -h 1024 -L -dmS mojo   perl deploy.pl prefork -m production -l http://*:3000
-    screen -h 1024 -L -dmS minion perl deploy.pl minion worker -m production -I 15 -C 5 -R 3600 -j 6
+    screen -h 1024 -L -dmS minion perl deploy.pl minion worker -m production -I 15 -C 5 -R 3600 -j 12
     sleep 1
     screen -list
 }
