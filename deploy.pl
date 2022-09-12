@@ -472,15 +472,16 @@ get '/log/:node/:game' => sub ($c) {
     my $node = $c->stash('node');
 
     my $results = readLog(
-        node => $node,
-        game => $game
+        node        => $node,
+        game        => $game,
+        ssh_master  => $config->{'ssh_master'}
     );
 
     $c->render(
-        template => 'log',
-        log_data => $results,
-        node     => $node,
-        game     => $game
+        template    => 'log',
+        log_data    => $results,
+        node        => $node,
+        game        => $game
     );
 };
 
@@ -496,28 +497,28 @@ get '/info/:node/' => sub ($c) {
 
 get '/node/:node' => sub ($c) {
 
-    my $node    = $c->stash('node');
-    my $results = checkIsOnline(
-        list_by => 'node',
-        node    => $node,
-        game    => '',
-        ssh_master => $config->{'ssh_master'}
+    my $node        = $c->stash('node');
+    my $results     = checkIsOnline(
+        list_by     => 'node',
+        node        => $node,
+        game        => '',
+        ssh_master  => $config->{'ssh_master'}
     );
 
     my $ip = readFromDB(
-        table    => 'nodes',
-        column   => 'ip',
-        field    => 'name',
-        value    => $node,
-        hash_ref => 'false'
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $node,
+        hash_ref    => 'false'
     );
 
-    my $expected = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        field    => 'node',
-        value    => $node,
-        hash_ref => 'true'
+    my $expected    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'node',
+        value       => $node,
+        hash_ref    => 'true'
     );
 
     my $jobs = app->minion->jobs(
@@ -529,19 +530,19 @@ get '/node/:node' => sub ($c) {
     );
 
     $c->render(
-        template => 'node',
-        nodes    => $results,
-        history  => $jobs,
-        expected => $expected
+        template    => 'node',
+        nodes       => $results,
+        history     => $jobs,
+        expected    => $expected
     );
 };
 
-get '/files/:game' => sub ($c) {
+get '/files/:game'  => sub ($c) {
 
-    my $game    = $c->stash('game');
-    my @results = getFiles( game => $game );
+    my $game        = $c->stash('game');
+    my @results     = getFiles( game => $game );
 
-    $c->stash( files => @results );
+    $c->stash( files    => @results );
     $c->render( template => 'files' );
 };
 
@@ -552,26 +553,26 @@ get '/debug/:node/:game' => sub ($c) {
     my ( $results, $expected );
 
     my $is_configured = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        field    => 'name',
-        value    => $game,
-        hash_ref => 'false'
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'false'
     );
 
     my $jobs = app->minion->jobs(
         {
-            queues => ['default'],
-            states => [ 'active', 'locked' ],
-            tasks  => [ 'boot',   'halt' ]
+            queues  => ['default'],
+            states  => [ 'active', 'locked' ],
+            tasks   => [ 'boot',   'halt' ]
         }
     );
 
     $c->render(
-        template => 'node',
-        nodes    => $results,
-        history  => $jobs,
-        expected => $expected
+        template    => 'node',
+        nodes       => $results,
+        history     => $jobs,
+        expected    => $expected
     );
 };
 
@@ -582,26 +583,26 @@ get '/move/:node/:game' => sub ($c) {
     my ( $results, $expected );
 
     my $is_configured = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        field    => 'name',
-        value    => $game,
-        hash_ref => 'false'
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'false'
     );
 
     my $jobs = app->minion->jobs(
         {
-            queues => ['default'],
-            states => [ 'active', 'locked' ],
-            tasks  => [ 'boot',   'halt' ]
+            queues  => ['default'],
+            states  => [ 'active', 'locked' ],
+            tasks   => [ 'boot',   'halt' ]
         }
     );
 
     $c->render(
-        template => 'node',
-        nodes    => $results,
-        history  => $jobs,
-        expected => $expected
+        template    => 'node',
+        nodes       => $results,
+        history     => $jobs,
+        expected    => $expected
     );
 };
 
@@ -614,7 +615,7 @@ any '*' => sub ($c) {
 ##    Functions
 ###########################################################
 
-# update(game => 'castaway');
+
 sub update {
     my %args = (
         game    => '',
@@ -822,7 +823,7 @@ sub readFromDB {
     $query .= ";";
     $log->debug("$query");
 
-    my $sth = $dbh->prepare($query);
+    my $sth = $dbh->prepare_cached($query);
     $sth->execute(); 
 
     while ( $ref = $sth->fetchrow_hashref() ) {
