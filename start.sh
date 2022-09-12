@@ -1,8 +1,8 @@
 #!/bin/bash
 
 function start () {
-    screen -h 1024 -L -dmS mojo   perl deploy.pl prefork -m production -l http://*:3000
-#    hypnotoad deploy.pl 
+#    screen -h 1024 -L -dmS mojo   perl deploy.pl prefork -m production -l http://*:3000
+    hypnotoad deploy.pl 
     screen -h 1024 -L -dmS minion perl deploy.pl minion worker -m production -I 15 -C 5 -R 3600 -j 12
     sleep 1
     screen -list
@@ -16,7 +16,7 @@ function test () {
 
 function stop () {
     screen -list | awk -F '.' '/mojo/ || /minion/ {print $1}' | xargs kill
-#    hypnotoad -s deploy.pl
+    hypnotoad -s deploy.pl
     sleep 2
     screen -list
 }
