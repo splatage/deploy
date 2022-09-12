@@ -1763,21 +1763,9 @@ __DATA__
           <a class="nav-link" href="/status">status</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link" href="https://stats.splatage.com">stats</a>
+          %= link_to Logout => '/yancy/auth/password/logout'
         </li>
-        <li class="nav-item">
-          <a class="nav-link" href="https://www.splatage.com">www</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link" href="https://discord.com/channels/697634318067040327/697634318608236556">discord</a>
-        </li>
-
-        <li class="nav-item">
-        %= link_to Logout => '/yancy/auth/password/logout'
-    
-        
-        </li>
-            % }
+      % }
     </ul>
     </div>
   </div>
