@@ -20,7 +20,6 @@ use strict;
 use warnings;
 
 plugin 'AutoReload';
-plugin 'StaticCompressor';
 app->secrets([rand]);
 
 
@@ -30,6 +29,7 @@ app->secrets([rand]);
 
 my $log_conf;
 my %ssh_master;
+my $dbh;
 
 
 ###########################################################
@@ -786,19 +786,29 @@ sub readFromDB {
     my $value  = $args{'value'};
 
     $log->debug("sub readFromDB: Connecting to DB table:$table column:$column field:$field value:$value" );
+    
 
-    my $dbh = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
+    if ( defined($dbh) ) {
+        unless ( $dbh->ping ) {
+        $log->debug("No connection to DB...reconnecting");
+        $dbh = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
             "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1 } );
+        }
+        else {
+            $log->debug("DB connection is HEALTHY");
+        }
+    }
+    else {
+        $log->debug("Establishing DB connection");
+        $dbh = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
+            "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1 } );
+    }
 
     my ( $ref, $ref_name, $ref_value );
     my $result = {};
     my %result = %$result;
    
-#    unless ( $dbh->ping ) {
-#        $log->info("No connection to DB...reconnecting");
-#        $dbh = DBI->connect( "DBI:mysql:database=$db_name;host=$db_host",
-#            "$db_user", "$db_pass", { 'RaiseError' => 1 } );
-#    }
+
 
     my $select = '*';
     $select = $column if ( $args{'hash_ref'} eq 'false' );
@@ -827,7 +837,7 @@ sub readFromDB {
     }
 
     $sth->finish();
-    $dbh->disconnect;
+#    $dbh->disconnect;
 #    $log->debug("DB free after $count seconds");
     $log->debug("DB query complete");
         
