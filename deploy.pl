@@ -1763,9 +1763,9 @@ __DATA__
           <a class="nav-link" href="/status">status</a>
         </li>
         <li class="nav-item">
-          %= link_to Logout => '/yancy/auth/password/logout'
+          <a class="nav-link" href="/yancy/auth/password/logout">logout</a>
         </li>
-      % }
+            % }
     </ul>
     </div>
   </div>
