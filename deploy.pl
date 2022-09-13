@@ -36,7 +36,7 @@ my %ssh_master;
 
 
 ###########################################################
-##   Database Connection                                 ##
+##   Database Connection and Logging                     ##
 ###########################################################
 
 my $config = plugin Config => {
@@ -65,10 +65,15 @@ my $db = Mojo::mysql->strict_mode($db_string);
 
 plugin Minion => { mysql => "$db_string" };
 
+
+
 configLogger();
 Log::Log4perl::init( \$log_conf );
-
 my $log = Log::Log4perl::get_logger();
+
+# Mojo Logger
+app->log->path(app->home->rel_file(app->moniker . '.log'));
+
 $log->info("Hello! Starting...");
 
 
@@ -477,6 +482,16 @@ get '/log/:node/:game' => sub ($c) {
         game        => $game
     );
 };
+
+get '/test' => 'echo';
+
+websocket '/echo' => sub ($c) {
+  $c->on(json => sub ($c, $hash) {
+    $hash->{msg} = "echo: $hash->{msg}";
+    $c->send({json => $hash});
+  });
+};
+
 
 get '/info/:node/' => sub ($c) {
 
@@ -1301,7 +1316,7 @@ sub configLogger {
         log4perl.appender.Logfile           = Log::Log4perl::Appender::File
         log4perl.appender.Logfile.filename  = deploy.log
         log4perl.appender.Logfile.layout    = Log::Log4perl::Layout::PatternLayout
-        log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms %p %L %m %T %n%n 
+        log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms [%p] {%P}:%L %m%n 
  
         log4perl.appender.Screen            = Log::Log4perl::Appender::Screen
         log4perl.appender.Screen.stderr     = 0
@@ -1383,17 +1398,18 @@ sub storeGame {
     if (!$user || !$suser || !$ip || !$sip ) {
         $log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
         return "Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip";
-    }
+    };
 
-    sendCommand( 
-        command     => 'say Backup starting...^Msave-off^Msave-all', 
-        game        => $game, 
-        node        => $settings->{$game}{'node'},
-        ip          => $ip,
-        ssh_master  => $args{'ssh_master'}
-    );
-    
-    sleep(0.5);
+    unless ( $settings->{$game}{'isBungee'} ) {
+       sendCommand( 
+            command     => 'say Backup starting...^Msave-off^Msave-all', 
+            game        => $game, 
+            node        => $settings->{$game}{'node'},
+            ip          => $ip,
+            ssh_master  => $args{'ssh_master'}
+        );
+        sleep(0.5);
+    };
 
     $cp_from = $user . "@" . $ip . ":";
     $cp_from .= $settings->{$game}{"node_path"} . "/" . $game;
@@ -1414,22 +1430,24 @@ sub storeGame {
 "rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
       );
       
-    sendCommand( 
-        command     => "say Backup complete^Msave-on", 
-        game        => $game, 
-        node        => $settings->{$game}{'node'},
-        ip          => $ip,
-        ssh_master  => $args{'ssh_master'}
-    );
+    unless ( $settings->{$game}{'isBungee'} ) {
+        sendCommand( 
+            command     => "say Backup complete^Msave-on", 
+            game        => $game, 
+            node        => $settings->{$game}{'node'},
+            ip          => $ip,
+            ssh_master  => $args{'ssh_master'}
+        );
 
-    sendCommand( 
-        command     => "co purge t:30d", 
-        game        => $game, 
-        node        => $settings->{$game}{'node'},
-        ip          => $ip,
-        ssh_master  => $args{'ssh_master'}
-    );
-    sleep(0.5);
+        sendCommand( 
+            command     => "co purge t:30d", 
+            game        => $game, 
+            node        => $settings->{$game}{'node'},
+            ip          => $ip,
+            ssh_master  => $args{'ssh_master'}
+        );
+        sleep(0.5);
+    };
     
     return $output;
 }
@@ -2388,3 +2406,20 @@ pre {
 </body>
 </html>
 
+
+@@ echo.html.ep
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Echo</title>
+    <script>
+      const ws = new WebSocket('<%= url_for('echo')->to_abs %>');
+      ws.onmessage = function (event) {
+        document.body.innerHTML += JSON.parse(event.data).msg;
+      };
+      ws.onopen = function (event) {
+        ws.send(JSON.stringify({msg: 'I ♥ Mojolicious!'}));
+      };
+    </script>
+  </head>
+</html>

@@ -9,7 +9,7 @@ function start () {
 }
 
 function test () {
-    screen -h 1024 -L -dmS mojo_test1 morbo deploy.pl -l http://*:3000
+    screen -h 1024 -L -dmS mojo_test1 morbo deploy.pl -l http://*:3001
     sleep 1
     screen -list
 }
