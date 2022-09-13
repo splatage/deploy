@@ -1,7 +1,7 @@
 
 use v5.28;
-use Mojolicious::Lite -signatures, -async_await;
-use Mojo::AsyncAwait;
+use Mojolicious::Lite -signatures;
+use Parallel::ForkManager;
 use Mojo::mysql;
 use DBD::mysql;
 use DBI;
@@ -878,7 +878,9 @@ sub checkIsOnline {
 
     $log->debug("Query: \[@nodes_to_check\]");
 
+    my $pm = Parallel::ForkManager->new(5);
 
+    DATA_LOOP:
     foreach my $this_node (@nodes_to_check) {
         $return_hash{$this_node} = {};
         $log->debug("Query $this_node for games...");
@@ -918,6 +920,7 @@ sub checkIsOnline {
             }
         }
     }
+    $pm->wait_all_children;
 
     ## Remap temp_hash into return_hash based on $list_by arg
     #  Using list_by|game pair to avoind duplicates
