@@ -483,15 +483,6 @@ get '/log/:node/:game' => sub ($c) {
     );
 };
 
-get '/test' => 'echo';
-
-websocket '/echo' => sub ($c) {
-  $c->on(json => sub ($c, $hash) {
-    $hash->{msg} = "echo: $hash->{msg}";
-    $c->send({json => $hash});
-  });
-};
-
 
 get '/info/:node/' => sub ($c) {
 
@@ -2385,9 +2376,6 @@ pre {
 </html>
 
 
-
-
-
 @@ login.html.ep
 % layout 'nav'; 
 
@@ -2401,25 +2389,7 @@ pre {
 
 %= $c->yancy->auth->login_form
 
-
 </div>
 </body>
 </html>
 
-
-@@ echo.html.ep
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Echo</title>
-    <script>
-      const ws = new WebSocket('<%= url_for('echo')->to_abs %>');
-      ws.onmessage = function (event) {
-        document.body.innerHTML += JSON.parse(event.data).msg;
-      };
-      ws.onopen = function (event) {
-        ws.send(JSON.stringify({msg: 'I ♥ Mojolicious!'}));
-      };
-    </script>
-  </head>
-</html>
