@@ -16,6 +16,8 @@ use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
 use Log::Log4perl;
+use Mojo::log;
+
 use strict;
 use warnings;
 
@@ -29,7 +31,9 @@ app->secrets([rand]);
 
 my $log_conf;
 my %ssh_master;
-#my $dbh;
+
+# Hash to store threaded db handles based on $PID
+#my %dbh;
 
 
 ###########################################################
@@ -64,6 +68,7 @@ plugin Minion => { mysql => "$db_string" };
 
 configLogger();
 Log::Log4perl::init( \$log_conf );
+app->log( Mojo::Log->new( path => hypnotoad.log, level => 'debug' ) );
 
 my $log = Log::Log4perl::get_logger();
 $log->info("Hello! Starting...");
@@ -771,37 +776,23 @@ sub readFromDB {
     return 0 if not $args{'table'};
     return 0 if not $args{'column'};
 
-    my $dbh;
+    my $pid=$$;
+    my %dbh;
+
     my $table  = $args{'table'};
     my $column = $args{'column'};
     my $field  = $args{'field'};
     my $value  = $args{'value'};
 
-    $log->debug("sub readFromDB: Connecting to DB table:$table column:$column field:$field value:$value" );
+    $log->debug("sub readFromDB: PID: $pid Connecting to DB table:$table column:$column field:$field value:$value" );
     
-
-    if ( defined($dbh) ) {
-        unless ( $dbh->ping ) {
-        $log->debug("No connection to DB...reconnecting");
-        $dbh = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
-            "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1 } );
-        }
-        else {
-            $log->debug("DB connection is HEALTHY");
-        }
-    }
-    else {
-        $log->debug("Establishing DB connection");
-        $dbh = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
-            "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1 } );
-    }
+    $dbh{$pid} = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
+       "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1, AutoCommit => 0 } );
 
     my ( $ref, $ref_name, $ref_value );
     my $result = {};
     my %result = %$result;
-   
-
-
+ 
     my $select = '*';
     $select = $column if ( $args{'hash_ref'} eq 'false' );
 
@@ -814,7 +805,7 @@ sub readFromDB {
     $query .= ";";
     $log->debug("$query");
 
-    my $sth = $dbh->prepare_cached($query);
+    my $sth = $dbh{$pid}->prepare($query);
     $sth->execute(); 
 
     while ( $ref = $sth->fetchrow_hashref() ) {
@@ -829,8 +820,7 @@ sub readFromDB {
     }
 
     $sth->finish();
-    $dbh->disconnect;
-#    $log->debug("DB free after $count seconds");
+    $dbh{$pid}->disconnect;
     $log->debug("DB query complete");
         
     if ( $args{'hash_ref'} eq 'true' ) {
@@ -841,7 +831,7 @@ sub readFromDB {
     }
 }
 
-# checkIsOnline();
+
 sub checkIsOnline {
 
     my %args = (
