@@ -16,7 +16,6 @@ use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
 use Log::Log4perl;
-use Mojo::log;
 
 use strict;
 use warnings;
@@ -68,7 +67,6 @@ plugin Minion => { mysql => "$db_string" };
 
 configLogger();
 Log::Log4perl::init( \$log_conf );
-app->log( Mojo::Log->new( path => hypnotoad.log, level => 'debug' ) );
 
 my $log = Log::Log4perl::get_logger();
 $log->info("Hello! Starting...");
