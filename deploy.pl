@@ -73,6 +73,7 @@ app->log->path(app->home->rel_file(app->moniker . '.log'));
 app->log->level('trace');
 # app->secrets([rand]);
 
+plugin 'RemoteAddr';
 
 $log->info("Hello! Starting...");
 
@@ -176,7 +177,9 @@ group {
             return 1;
         }
         $c->res->headers->www_authenticate('Basic');
-        return undef;
+#        return undef;
+        $c->flash( error => "you need to login to do that" );
+        $c->redirect_to("/login");
     };
     plugin 'Minion::Admin' => { route => $route };
 };
@@ -188,20 +191,28 @@ group {
             return 1;
         }
         $c->res->headers->www_authenticate('Basic');
-        return undef;
+#        return undef;
+        $c->flash( error => "you need to login to do that" );
+        $c->redirect_to("/login");
+
     };
     plugin 'Status' => {return_to => '/', route => $route};
 };
 
 
 under sub ($c) {
-
     # Authenticated
     my $name = $c->yancy->auth->current_user || '';
     if ( $name ne '' ) {
-        return 1;
+         return 1;
     }
+    # Security log authentication attempts
+    my $ip = $c->remote_addr;
+
+    $log->warn("authentication attempt from $ip");
+    $c->flash( error => "your ip $ip is logged" );
     $c->render( template => 'login' );
+
     return;
 };
 
@@ -464,26 +475,6 @@ get '/' => sub ($c) {
     $c->render( template => 'index' );
 };
 
-get '/log/:node/:game' => sub ($c) {
-
-    my $game = $c->stash('game');
-    my $node = $c->stash('node');
-
-    my $results = readLog(
-        node        => $node,
-        game        => $game,
-        ssh_master  => $config->{'ssh_master'}
-    );
-
-    $c->render(
-        template    => 'log',
-        log_data    => $results,
-        node        => $node,
-        game        => $game
-    );
-};
-
-
 get '/info/:node/' => sub ($c) {
 
     my $node = $c->stash('node');
@@ -607,27 +598,34 @@ get '/move/:node/:game' => sub ($c) {
 
 get '/reload' => sub ($c) {
     my $ppid = getppid();
+    my $ip = $c->remote_addr;
     kill 'USR2' => $ppid;
     sleep(1);
-    $c->flash(message => "hot reload signal sent to $ppid...");
+    $c->flash(message => "hot reload signal sent to $ppid");
     $c->redirect_to("/");
 };
 
 get '/logfile' => sub ($c) {
 
+
     $log->debug("retrieving logfile");
     $c->render(
-        template => 'logfile',
-        logfile => ''
+        template => 'logfile'
         );
 };
 
 
 websocket '/logfile-ws' => sub {
+
+
     my $line_count;
     my $self = shift;
     my $file = app->log->path;
     my $results;
+
+    my $game;
+    my $ip;
+    my $user;
 
     $self->inactivity_timeout(3600);
 
@@ -635,7 +633,14 @@ websocket '/logfile-ws' => sub {
 
     my $send_data;
     $send_data = sub {
-        $results = updatePage( file => $file, line_count => $results->{'line_count'} );
+        $results = updatePage( 
+                    file        => $file, 
+                    line_count  => $results->{'line_count'},
+                    ip          => $ip,
+                    user        => $user,
+                    game        => $game,
+                 );
+                 
         if ( $results->{'new_content'} ) {
          $self->send($results->{'new_content'});
         }
@@ -658,27 +663,123 @@ get '/clearlogfile' => sub ($c) {
     $c->redirect_to("/logfile");
 };
 
+websocket '/log/:node/<game>-ws' => sub {
+    my $line_count;
+    my $self = shift;
+    my $results;
+
+    my $node = $self->stash('node');
+    my $game = $self->stash('game');
+
+
+    $self->inactivity_timeout(3600);
+
+    $log->debug("reading $game logfile via websocket");
+
+    my $send_data;
+    $send_data = sub {
+    
+        my $logdata     = readLog(
+            node        => $node,
+            game        => $game,
+            ssh_master  => $config->{'ssh_master'}
+        );
+
+        $results = updatePage_game( 
+                    logdata     => $logdata,
+                    line_count  => $results->{'line_count'},
+                 );
+                 
+        if ( $results->{'new_content'} ) {
+         $self->send($results->{'new_content'});
+        }
+    };
+
+    $send_data->();
+    Mojo::IOLoop->recurring(10, $send_data);
+
+};
+
+
+get '/log/:node/:game' => sub ($c) {
+
+    my $game = $c->stash('game');
+    my $node = $c->stash('node');
+    $log->debug("reading $game logfile");
+    $c->render(
+        template => 'gamelog',
+        game     => $game,
+        node     => $node
+        );
+};
+
+
 any '*' => sub ($c) {
+    my $url = $c->req->url->to_abs;
+    my $ip  = $c->remote_addr;
+    my $user = $c->yancy->auth->current_user->{'username'};
+    $log->warn("possible snooping: $user \[$ip\] $url");
     $c->flash( error => "page doesn't exist" );
     $c->redirect_to("/");
 };
+
 
 ###########################################################
 ##    Functions
 ###########################################################
 
+sub updatePage_game {
+    my %args = ( 
+       line_count   => '',
+       iteration    => '',
+       logdata      => '',
+       user         => '',
+       game         => '',
+       file         => '',
+       new_content  => '',
+    @_ );
+    
+    open(FILE, $args{'logdata'} );
+
+    my $iteration = 0;
+    my $new_content = '';
+
+    while ($args{'logdata'}) {
+        ++$iteration;
+
+        if ( $iteration > $args{'line_count'} ) {
+            ++$args{'line_count'};
+            $new_content = $new_content . "<div>" . $_ . "</div>";
+        }
+    }
+
+    $args{'iteration'}   = $iteration;
+    $args{'new_content'} = $new_content;
+
+    return \%args;
+}
+
 
 sub updatePage {
-    my %args = ( @_ );
+    my %args = ( 
+       line_count   => '',
+       iteration    => '',
+       ip           => '',
+       user         => '',
+       game         => '',
+       file         => '',
+       new_content  => '',
+    @_ );
+    
     open(FILE, $args{'file'} );
 
-    my $iteration_count = 0;
+    my $iteration = 0;
     my $new_content = '';
 
     while (<FILE>) {
-        ++$iteration_count;
+        ++$iteration;
 
-        if ( $iteration_count > $args{'line_count'} ) {
+        if ( $iteration > $args{'line_count'} ) {
             ++$args{'line_count'};
             $new_content = $new_content . "<div>" . $_ . "</div>";
         }
@@ -686,7 +787,7 @@ sub updatePage {
 
     close (FILE);
 
-    $args{'iteration_count'} = $iteration_count;
+    $args{'iteration'}   = $iteration;
     $args{'new_content'} = $new_content;
 
     return \%args;
@@ -833,7 +934,7 @@ sub readLog {
 
     foreach (@lines) {
         $return_string .=
-          '<div style="width: 80rem;"><small>' . $_ . '</small></div>';
+          '<div style="width: 80rem;"><small>' . $_ . '</small></div>\n';
     }
 
     $return_string =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;
@@ -1770,7 +1871,7 @@ __DATA__
  
     % my $flash_message = $c->flash('message');
     % if ($flash_message) {
-    <div id="top-alert" class="alert alert-primary alert-dismissible" role="alert">
+    <div id="top-alert" class="alert alert-primary alert-dismissible fade show" role="alert">
         <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         <%= $flash_message %>
@@ -1780,7 +1881,7 @@ __DATA__
 
     % my $flash_error = $c->flash('error');
     % if ($flash_error) {
-    <div id="top-alert" class="alert alert-danger alert-dismissible" role="alert">
+    <div id="top-alert" class="alert alert-danger alert-dismissible fade show" role="alert">
         <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         <%= $flash_error %>
@@ -2475,9 +2576,7 @@ pre {
           </div>
         </div>
       </div>
-<pre>
-<%= $logfile %>
-</pre>
+
    <div id='command-content'>
         %# This is the command output
     </div>
@@ -2489,7 +2588,9 @@ pre {
             var ws_host = window.location.href;
             %# We are requesting websocket data...
             %# So change the http: part to ws:
-            ws_host = ws_host.replace(/http[s]*:/,"ws:") + "-ws";
+            ws_host = ws_host.replace(/http:/,"ws:");
+            ws_host = ws_host.replace(/https:/,"wss:");
+            ws_host = ws_host + "-ws";
             %# I also tacked on the "-ws" at the end
             %# Connect the remote socket
             var socket = new WebSocket(ws_host);
@@ -2507,5 +2608,57 @@ pre {
     </script>
 </body>
 </html>
+
+
+@@ gamelog.html.ep
+% layout 'nav';
+
+<!DOCTYPE html>
+
+<html>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+        <div class="row d-flex justify-content-between alert alert-success" role="alert">
+          <div class="col-4">
+            <h4 class="alert-heading">server logfile</h4>
+          </div>
+          <div class="col-2">
+            <a class="btn btn-outline-success" href="/clearlogfile" role="button">clear logfile</a>
+          </div>
+        </div>
+      </div>
+
+   <div id='command-content'>
+        %# This is the command output
+    </div>
+  </div>
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"></script>
+      <script type="text/javascript">
+        $(document).ready(function () {
+            %# Grab our current location
+            var ws_host = window.location.href;
+            %# We are requesting websocket data...
+            %# So change the http: part to ws:
+            ws_host = ws_host.replace(/http:/,"ws:");
+            ws_host = ws_host.replace(/https:/,"wss:");
+            ws_host = ws_host + "-ws";
+            %# I also tacked on the "-ws" at the end
+            %# Connect the remote socket
+            var socket = new WebSocket(ws_host);
+            %# When we recieve data from the websocket do the following
+            %# with "msg" as the content.
+            socket.onmessage = function (msg) {
+                %# Append the new content to the end of our page
+                $('#command-content').append(msg.data);
+                %# Scroll down to the bottom
+                $('html, body').animate({scrollTop: $(document).height()}, 'slow');
+             }
+            %# Scroll down to the bottom
+            $('html, body').animate({scrollTop: $(document).height()}, 'slow');
+        });
+    </script>
+</body>
+</html>
+
 
 
