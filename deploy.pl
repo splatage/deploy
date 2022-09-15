@@ -1,7 +1,8 @@
 
 use v5.28;
 use Mojolicious::Lite -signatures;
-use Parallel::ForkManager;
+use Net::OpenSSH::Parallel;
+use Net::OpenSSH;
 use Mojo::mysql;
 use DBD::mysql;
 use DBI;
@@ -9,7 +10,6 @@ use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
 use IO::Socket::SSL;
 use Minion;
-use Net::OpenSSH;
 use Carp         qw( croak );
 use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
@@ -19,9 +19,6 @@ use Log::Log4perl;
 
 use strict;
 use warnings;
-
-plugin 'AutoReload';
-app->secrets([rand]);
 
 
 ###########################################################
@@ -73,6 +70,9 @@ my $log = Log::Log4perl::get_logger();
 
 # Mojo Logger
 app->log->path(app->home->rel_file(app->moniker . '.log'));
+app->log->level('trace');
+# app->secrets([rand]);
+
 
 $log->info("Hello! Starting...");
 
@@ -605,6 +605,59 @@ get '/move/:node/:game' => sub ($c) {
     );
 };
 
+get '/reload' => sub ($c) {
+    my $ppid = getppid();
+    kill 'USR2' => $ppid;
+    sleep(1);
+    $c->flash(message => "hot reload signal sent to $ppid...");
+    $c->redirect_to("/");
+};
+
+get '/logfile' => sub ($c) {
+
+    $log->debug("retrieving logfile");
+    $c->render(
+        template => 'logfile',
+        logfile => ''
+        );
+};
+
+
+websocket '/logfile-ws' => sub {
+    my $line_count;
+    my $self = shift;
+    my $file = app->log->path;
+    my $results;
+
+    $self->inactivity_timeout(3600);
+
+    $log->debug("reading logfile via websocket");
+
+    my $send_data;
+    $send_data = sub {
+        $results = updatePage( file => $file, line_count => $results->{'line_count'} );
+        if ( $results->{'new_content'} ) {
+         $self->send($results->{'new_content'});
+        }
+    };
+
+    $send_data->();
+    Mojo::IOLoop->recurring(5, $send_data);
+
+};
+
+
+
+get '/clearlogfile' => sub ($c) {
+    my $file = app->log->path;
+    truncate $file, 0;
+
+    $log->debug("log file cleared");
+
+    $c->flash(message => "logfile cleared");
+    $c->redirect_to("/logfile");
+};
+
 any '*' => sub ($c) {
     $c->flash( error => "page doesn't exist" );
     $c->redirect_to("/");
@@ -614,6 +667,30 @@ any '*' => sub ($c) {
 ##    Functions
 ###########################################################
 
+
+sub updatePage {
+    my %args = ( @_ );
+    open(FILE, $args{'file'} );
+
+    my $iteration_count = 0;
+    my $new_content = '';
+
+    while (<FILE>) {
+        ++$iteration_count;
+
+        if ( $iteration_count > $args{'line_count'} ) {
+            ++$args{'line_count'};
+            $new_content = $new_content . "<div>" . $_ . "</div>";
+        }
+    }
+
+    close (FILE);
+
+    $args{'iteration_count'} = $iteration_count;
+    $args{'new_content'} = $new_content;
+
+    return \%args;
+}
 
 sub update {
     my %args = (
@@ -878,10 +955,9 @@ sub checkIsOnline {
 
     $log->debug("Query: \[@nodes_to_check\]");
 
-    my $pm = Parallel::ForkManager->new(5);
 
-    DATA_LOOP:
     foreach my $this_node (@nodes_to_check) {
+
         $return_hash{$this_node} = {};
         $log->debug("Query $this_node for games...");
 
@@ -920,7 +996,6 @@ sub checkIsOnline {
             }
         }
     }
-    $pm->wait_all_children;
 
     ## Remap temp_hash into return_hash based on $list_by arg
     #  Using list_by|game pair to avoind duplicates
@@ -1246,7 +1321,7 @@ sub connectSSH {
             timeout     => 60,
             async       => 1,
             ctl_path    => $socket,
-            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
+            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=1' ]
         );
 
         $ssh_master{ $PID.$args{'user'}.$args{'ip'} } = $args{'link'};
@@ -1259,7 +1334,8 @@ sub connectSSH {
         $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
             batch_mode  => 1,
             timeout     => 60,
-            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=2' ]
+            async       => 1,
+            master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=1' ]
         );
     }
 
@@ -1304,39 +1380,18 @@ sub haltGame {
 sub configLogger {
 
     $log_conf = qq{
-        log4perl.category                   = $config->{'log_level'}, Logfile, Screen, DBAppndr
+        log4perl.category                   = $config->{'log_level'}, Logfile, Screen
 
  
         log4perl.appender.Logfile           = Log::Log4perl::Appender::File
         log4perl.appender.Logfile.filename  = deploy.log
         log4perl.appender.Logfile.layout    = Log::Log4perl::Layout::PatternLayout
-        log4perl.appender.Logfile.layout.ConversionPattern = [%r|%R]ms [%p] {%P}:%L %m%n 
+        log4perl.appender.Logfile.layout.ConversionPattern = [%d{yyyy-MM-d HH:mm:ss.SSSSS}] [%P] [%p] %R ms %m%n 
  
         log4perl.appender.Screen            = Log::Log4perl::Appender::Screen
         log4perl.appender.Screen.stderr     = 0
         log4perl.appender.Screen.layout    = Log::Log4perl::Layout::PatternLayout
         log4perl.appender.Screen.layout.ConversionPattern = [%r|%R]ms [%p] {%P}:%L %m%n 
-  
-        log4perl.appender.DBAppndr            = Log::Log4perl::Appender::DBI
-    };
-
-    $log_conf .=
-      "log4perl.appender.DBAppndr.datasource = DBI:mysql:database=$config->{'db_name'}\n";
-    $log_conf .= "mc_control;host=$config->{'db_host'};port=3306\n";
-    $log_conf .= "log4perl.appender.DBAppndr.username   = $config->{'db_user'}\n";
-    $log_conf .= "log4perl.appender.DBAppndr.password   = $config->{'db_pass'}\n";
-
-    $log_conf .= q{
-        log4perl.appender.DBAppndr.sql        = \
-        INSERT INTO logFile                \
-            (date, loglevel, message) \
-            VALUES (?,?,?)
-
-        log4perl.appender.DBAppndr.params.1 = %d
-        log4perl.appender.DBAppndr.params.2 = %p  
-        log4perl.appender.DBAppndr.layout    = Log::Log4perl::Layout::NoopLayout
-        log4perl.appender.DBAppndr.warp_message = 0
-        log4perl.appender.DBAppndr.usepreparedStmt = 1
     };
 }
 
@@ -1638,12 +1693,12 @@ sub infoNode {
     print "$con_cmd\n";
 
     my $iperf = "
-Field	Meaning of Non-Zero Values
-errors	Poorly or incorrectly negotiated mode and speed, or damaged network cable.
-dropped	Possibly due to iptables or other filtering rules, more likely due to lack of network buffer memory.
-overrun	Number of times the network interface ran out of buffer space.
-carrier	Damaged or poorly connected network cable, or switch problems.
-collsns	Number of collisions, which should always be zero on a switched LAN. 
+Field    Meaning of Non-Zero Values
+errors    Poorly or incorrectly negotiated mode and speed, or damaged network cable.
+dropped    Possibly due to iptables or other filtering rules, more likely due to lack of network buffer memory.
+overrun    Number of times the network interface ran out of buffer space.
+carrier    Damaged or poorly connected network cable, or switch problems.
+collsns    Number of collisions, which should always be zero on a switched LAN. 
          Non-zero indicates problems negotiating appropriate duplex mode. 
          A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
@@ -1761,8 +1816,14 @@ __DATA__
         <li class="nav-item">
           <a class="nav-link" href="/status">status</a>
         </li>
+                <li class="nav-item">
+          <a class="nav-link" href="/reload">reload</a>
+        </li>
+                <li class="nav-item">
+          <a class="nav-link" href="/logfile">logfile</a>
+        </li>
         <li class="nav-item">
-          <a class="nav-link" href="/yancy/auth/password/logout">logout</a>
+          <a class="nav-link" href="/yancy/auth/password/logout">exit</a>
         </li>
             % }
     </ul>
@@ -1829,7 +1890,7 @@ __DATA__
 
 
 @@ node.html.ep
-% layout 'nav'; 
+% layout 'nav';
 
 <!DOCTYPE html>
 <html>
@@ -2051,7 +2112,7 @@ __DATA__
 
 
 @@ index.html.ep
-% layout 'nav'; 
+% layout 'nav';
 
 <!DOCTYPE html>
 <html>
@@ -2194,7 +2255,7 @@ __DATA__
 
 
 @@ log.html.ep
-% layout 'nav'; 
+% layout 'nav';
 
 <!DOCTYPE html>
 <html>
@@ -2322,7 +2383,7 @@ pre {
 
 
 @@ files.html.ep
-% layout 'nav'; 
+% layout 'nav';
 
 <!DOCTYPE html>
 
@@ -2352,7 +2413,7 @@ pre {
 
 
 @@ node_details.html.ep
-% layout 'nav'; 
+% layout 'nav';
 
 <!DOCTYPE html>
 <html>
@@ -2380,7 +2441,7 @@ pre {
 
 
 @@ login.html.ep
-% layout 'nav'; 
+% layout 'nav';
 
 <!DOCTYPE html>
 <html>
@@ -2395,4 +2456,56 @@ pre {
 </div>
 </body>
 </html>
+
+
+@@ logfile.html.ep
+% layout 'nav';
+
+<!DOCTYPE html>
+
+<html>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+        <div class="row d-flex justify-content-between alert alert-success" role="alert">
+          <div class="col-4">
+            <h4 class="alert-heading">server logfile</h4>
+          </div>
+          <div class="col-2">
+            <a class="btn btn-outline-success" href="/clearlogfile" role="button">clear logfile</a>
+          </div>
+        </div>
+      </div>
+<pre>
+<%= $logfile %>
+</pre>
+   <div id='command-content'>
+        %# This is the command output
+    </div>
+  </div>
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"></script>
+      <script type="text/javascript">
+        $(document).ready(function () {
+            %# Grab our current location
+            var ws_host = window.location.href;
+            %# We are requesting websocket data...
+            %# So change the http: part to ws:
+            ws_host = ws_host.replace(/http[s]*:/,"ws:") + "-ws";
+            %# I also tacked on the "-ws" at the end
+            %# Connect the remote socket
+            var socket = new WebSocket(ws_host);
+            %# When we recieve data from the websocket do the following
+            %# with "msg" as the content.
+            socket.onmessage = function (msg) {
+                %# Append the new content to the end of our page
+                $('#command-content').append(msg.data);
+                %# Scroll down to the bottom
+                $('html, body').animate({scrollTop: $(document).height()}, 'slow');
+             }
+            %# Scroll down to the bottom
+            $('html, body').animate({scrollTop: $(document).height()}, 'slow');
+        });
+    </script>
+</body>
+</html>
+
 
