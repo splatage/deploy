@@ -671,6 +671,12 @@ websocket '/log/:node/<game>-ws' => sub {
     $self->inactivity_timeout(900);
 
     $log->debug("reading $game on $node logfile via websocket");
+    
+    $self->on(json => sub {
+        my ($self, $hash) = @_;
+        $hash->{msg} = "echo: $hash->{msg}";
+        $self->send({json => $hash});
+    });
 
     my $send_data;
     $send_data = sub {
@@ -1899,15 +1905,15 @@ __DATA__
         aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
-       <div class="collapse navbar-collapse" id="navbarTogglerDemo01">
-    <a class="navbar-brand" href="/">
-      <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
-    </a>
+  <div class="collapse navbar-collapse" id="navbarTogglerDemo01">
+
+  <a class="navbar-brand" href="/">
+    <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
+  </a>
 
 
    <div class="container" id="navbarNav">
       <ul class="navbar-nav me-auto mb-2 mb-sm-0 nav-tabs">
-      
       % if ( $c->yancy->auth->current_user ) {
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/"><h6>home</h6></a>
@@ -1930,7 +1936,7 @@ __DATA__
         <li class="nav-item">
           <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>exit</h6></a>
         </li>
-            % }
+     % }
     </ul>
     </div>
   </div>
@@ -1938,7 +1944,7 @@ __DATA__
 
 
   <div height: 100%;>
-    <main class="container bg-secondary shadow-lg p-3 mb-5 mt-4 bg-body rounded" style="--bs-bg-opacity: .95;">
+    <main class="container bg-secondary shadow-lg mb-1 mt-1 p-3 bg-body rounded" style="--bs-bg-opacity: .95;">
         %= content
     </main>
   </div>
@@ -2631,8 +2637,18 @@ pre {
 
    <div id='command-content' class="text-wrap container-sm text-break">
         %# This is the command output
-    </div>
+   </div> 
   </div>
+
+<div class="input-group mb-3 container bg-secondary shadow-lg bg-body rounded">
+  <span class="input-group-text"><%= $game %>@<%= $node %> :~ </span>
+  <div class="form-floating">
+    <input type="text" class="form-control" id="floatingInputGroup1" placeholder="command">
+    <label for="floatingInputGroup1">command console</label>
+  </div>
+</div>
+
+
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"></script>
       <script type="text/javascript">
         $(document).ready(function () {
