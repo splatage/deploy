@@ -73,7 +73,7 @@ app->log->path(app->home->rel_file(app->moniker . '.log'));
 app->log->level('debug');
 
 if ( $config->{"secret"}) {
-    app->secrets( $config->{'secret'} );
+    app->secrets([$config->{'secret'}]);
 }
 else {
     app->secrets([rand]);
@@ -721,7 +721,7 @@ websocket '/log/:node/<game>-ws' => sub {
     };
 
     $send_data->();
-    $loop = Mojo::IOLoop->recurring(5, $send_data);
+    $loop = Mojo::IOLoop->recurring(2, $send_data);
 };
 
 
@@ -2632,8 +2632,8 @@ pre {
    </div>
  </div>
 
-<div class="input-group mb-3 container bg-secondary shadow-lg bg-body rounded">
-  <span class="input-group-text"><%= $game %>@<%= $node %> :~ </span>
+<div class="input-group mb-2 container bg-secondary shadow-lg bg-body rounded">
+  <span class="input-group-text" id="inputGroup-sizing-sm"><small><b><%= $game %>@<%= $node %> :~ </small></b></span>
   <div class="form-floating">
     <input type="text" class="form-control" id="cmd" placeholder="cmd">
     <label for="cmd">command console</label>
