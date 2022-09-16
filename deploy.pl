@@ -70,8 +70,15 @@ my $log = Log::Log4perl::get_logger();
 
 # Mojo Logger
 app->log->path(app->home->rel_file(app->moniker . '.log'));
-app->log->level('trace');
-# app->secrets([rand]);
+app->log->level('debug');
+
+if ( $config->{"secret"}) {
+    app->secrets( $config->{'secret'} );
+}
+else {
+    app->secrets([rand]);
+}
+
 
 plugin 'RemoteAddr';
 
@@ -624,8 +631,9 @@ websocket '/logfile-ws' => sub {
     my $game;
     my $ip;
     my $user;
+    my $loop;
 
-    $self->inactivity_timeout(900);
+    $self->inactivity_timeout(600);
 
     $log->debug("reading logfile via websocket");
 
@@ -643,9 +651,14 @@ websocket '/logfile-ws' => sub {
          $self->send($results->{'new_content'});
         }
     };
+    
+    $self->on(finish => sub ($ws, $code, $reason) {
+        $log->debug("WebSocket closed with status $code.");
+        Mojo::IOLoop->remove($loop);
+    });
 
     $send_data->();
-    Mojo::IOLoop->recurring(2, $send_data);
+    $loop = Mojo::IOLoop->recurring(1, $send_data);
 };
 
 
@@ -668,18 +681,23 @@ websocket '/log/:node/<game>-ws' => sub {
     my $node = $self->stash('node');
     my $game = $self->stash('game');
 
-    $self->inactivity_timeout(900);
+    my $loop;
+
+    $self->inactivity_timeout(600);
 
     $log->debug("reading $game on $node logfile via websocket");
 
     $self->on(json => sub {
          my ($c, $hash) = @_;
          #$hash->{cmd} = "echo: $hash->{cmd}";
-         
-         sendCommand( command => $hash->{cmd}, game => $game, node => $node, ssh_master  => $config->{'ssh_master'} );
-         
-         #$c->send({json => $hash});
+         sendCommand( command => $hash->{cmd}, game => $game, node => $node, ssh_master  => $config->{'minion_ssh_master'} );
+         $c->send( $game . "@" . $node . " :~ " . $hash->{cmd} );
          $log->warn("reply via websocket");
+    });
+    
+    $self->on(finish => sub ($ws, $code, $reason) {
+        $log->debug("WebSocket closed with status $code.");
+        Mojo::IOLoop->remove($loop);
     });
 
     my $send_data;
@@ -689,7 +707,9 @@ websocket '/log/:node/<game>-ws' => sub {
             game        => $game,
             ssh_master  => $config->{'ssh_master'}
         );
-
+        
+        $log->debug("$$ websocket: polling $game on $node ");
+        
         $results = updatePage_game( 
                     logdata     => $logdata,
                     line_count  => $results->{'line_count'},
@@ -701,7 +721,7 @@ websocket '/log/:node/<game>-ws' => sub {
     };
 
     $send_data->();
-    Mojo::IOLoop->recurring(3, $send_data);
+    $loop = Mojo::IOLoop->recurring(5, $send_data);
 };
 
 
@@ -757,7 +777,7 @@ sub updatePage_game {
 
         if ( $iteration > $args{'line_count'} ) {
             ++$args{'line_count'};
-            $new_content = $new_content . '<div><small>' . $_ . "</small></div>\n";
+            $new_content = $new_content . '<div>' . $_ . "</div>\n";
         }
     }
 
@@ -789,7 +809,7 @@ sub updatePage {
 
         if ( $iteration > $args{'line_count'} ) {
             ++$args{'line_count'};
-            $new_content = $new_content . "<div><small>" . $_ . "</small></div>\n";
+            $new_content = $new_content . "<div>" . $_ . "</div>\n";
         }
     }
 
@@ -1868,7 +1888,11 @@ __DATA__
         z-index: 99999;
     }
     .data a, .data span, .data tr, .data td { white-space: pre; }
-    #command-content{  text-indent: -26px; padding-left: 26px; }
+    
+    #command-content{  text-indent: -26px; 
+                padding-left: 26px; font-size: medium; color: #009933;
+                }
+
   </style>
   
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
@@ -2554,7 +2578,9 @@ pre {
       </div>
 
    <div id='command-content' class="text-wrap container-lg text-break">
+   <div>
         %# This is the command output
+        </div>
     </div>
   </div>
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"></script>
@@ -2575,11 +2601,9 @@ pre {
             socket.onmessage = function (msg) {
                 %# Append the new content to the end of our page
                 $('#command-content').append(msg.data);
-                %# Scroll down to the bottom
                 $('html, body').animate({scrollTop: $(document).height()}, 'slow');
              }
-            %# Scroll down to the bottom
-            $('html, body').animate({scrollTop: $(document).height()}, 'slow');
+             $('html, body').animate({scrollTop: $(document).height()}, 'slow');
         });
     </script>
 </body>
@@ -2602,7 +2626,9 @@ pre {
       </div>
 
    <div id='command-content' class="text-wrap container-sm text-break">
+   <div>
         %# This is the command output
+   </div>
    </div>
  </div>
 
@@ -2628,8 +2654,7 @@ pre {
                 $('html, body').animate({scrollTop: $(document).height()}, 'slow');
              }
             $('html, body').animate({scrollTop: $(document).height()}, 'slow');
-      
-
+            
       function send(e) {
         if (e.keyCode !== 13) {
            return false;
@@ -2642,8 +2667,9 @@ pre {
 
       document.getElementById('cmd').addEventListener('keypress', send);
       document.getElementById('cmd').focus();
-      });
 
+
+      });
     </script>
 </body>
 </html>
