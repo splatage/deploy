@@ -15,7 +15,6 @@ use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
-use Log::Log4perl;
 
 use strict;
 use warnings;
@@ -25,52 +24,50 @@ use warnings;
 ##         Declare Variables for Global Scope            ##
 ###########################################################
 
-my $log_conf;
 my %ssh_master;
-
-# Hash to store threaded db handles based on $PID
-#my %dbh;
-
 
 ###########################################################
 ##   Database Connection and Logging                     ##
 ###########################################################
 
-my $config = plugin Config => {
-    default => {
-        db_host             => '127.0.0.1',
-        db_user             => 'DB_username',
-        db_pass             => 'DB_password',
-        db_name             => 'DB_name',
-        allow_registration  => '0',
-        log_level           => 'DEBUG',
-        default_user        => 'minecraft',
-        ssh_master          => 'true',
-        minion_ssh_master   => 'false',
-    },
+my $config = plugin Config => { default => {
+    db_host             => '127.0.0.1',         # DataBase IP
+    db_user             => 'minecraft',         # Database Username
+    db_pass             => 'minecraft',         # Database Password
+    db_name             => 'deploy',            # Database name
+    allow_registration  => '0',                 # NOT recomended. Set to true to create first user
+    log_level           => 'info',              # INFO, DEBUG, WARN, TRACE
+    default_user        => 'minecraft',         # Default SSH user to perform admin tasks
+    ssh_master          => 'true',              # SSH master socket, is faster but prevents treading
+    minion_ssh_master   => 'false',             # Same issue, doesn't play nice with threading
+    MOJO_REVERSE_PROXY  => 'true',              # Are we behind a reverse proxy - recomended layout
+    secret              => 'supersecretsession',# Leave blank to regenerate a rendom secret each restart
+    poll_interval       => '1',                 # period in seconds to check logs over ssh
+
+    hypnotoad           => {
+#       listen          => ['https://*:3000?cert=keys/domain.crt&key=keys/domain.key'],
+        listen          => ['http://*:3000'],
+        workers         => 2,
+        proxy           => 1,
+        trusted_proxies => ['127.0.0.1', '192.168.0.0/16'],
+        spare           => 2,
+    } },
     file => 'deploy.conf'
 };
 
 
-my $db_string = "mysql://" 
-    . $config->{'db_user'} 
-    . ":" . $config->{'db_pass'} 
-    . "@" . $config->{'db_host'} 
+my $db_string = "mysql://"
+    . $config->{'db_user'}
+    . ":" . $config->{'db_pass'}
+    . "@" . $config->{'db_host'}
     . "/" . $config->{'db_name'};
 
 my $db = Mojo::mysql->strict_mode($db_string);
 
 plugin Minion => { mysql => "$db_string" };
 
-
-
-configLogger();
-Log::Log4perl::init( \$log_conf );
-my $log = Log::Log4perl::get_logger();
-
-# Mojo Logger
 app->log->path(app->home->rel_file(app->moniker . '.log'));
-app->log->level('debug');
+app->log->level($config->{'log_level'});
 
 if ( $config->{"secret"}) {
     app->secrets([$config->{'secret'}]);
@@ -82,7 +79,7 @@ else {
 
 plugin 'RemoteAddr';
 
-$log->info("Hello! Starting...");
+app->log->info("Hello! Starting...");
 
 
 ###########################################################
@@ -150,7 +147,7 @@ my $settings = readFromDB(
 
 foreach my $game (keys %{$settings}) {
     $cron = $settings->{$game}{'crontab'} or $cron = int(rand(5)) . ' * * * *'; #int(rand(5) + 10)
-    $log->info("scheduling backup for $game $cron");
+    app->log->info("scheduling backup for $game $cron");
 
     plugin Cron => ( $game => {crontab => $cron, code => sub {
         app->minion->enqueue( store => [$game], { attempts => 2, expire => 120 } );
@@ -216,7 +213,7 @@ under sub ($c) {
     # Security log authentication attempts
     my $ip = $c->remote_addr;
 
-    $log->warn("authentication attempt from $ip");
+    app->log->warn("authentication attempt from $ip");
     $c->flash( error => "your ip $ip is logged" );
     $c->render( template => 'login' );
 
@@ -615,7 +612,7 @@ get '/reload' => sub ($c) {
 
 
 get '/logfile' => sub ($c) {
-    $log->debug("retrieving logfile");
+    app->log->debug("retrieving logfile");
     $c->render(
         template => 'logfile'
         );
@@ -635,30 +632,30 @@ websocket '/logfile-ws' => sub {
 
     $self->inactivity_timeout(600);
 
-    $log->debug("reading logfile via websocket");
+    app->log->debug("reading logfile via websocket");
 
     my $send_data;
     $send_data = sub {
-        $results = updatePage( 
-                    file        => $file, 
+        $results = updatePage(
+                    file        => $file,
                     line_count  => $results->{'line_count'},
                     ip          => $ip,
                     user        => $user,
                     game        => $game,
                  );
-                 
+
         if ( $results->{'new_content'} ) {
          $self->send($results->{'new_content'});
         }
     };
-    
+
     $self->on(finish => sub ($ws, $code, $reason) {
-        $log->debug("WebSocket closed with status $code.");
+        app->log->info("WebSocket closed with status $code.");
         Mojo::IOLoop->remove($loop);
     });
 
     $send_data->();
-    $loop = Mojo::IOLoop->recurring(1, $send_data);
+    $loop = Mojo::IOLoop->recurring($config->{'poll_interval'}, $send_data);
 };
 
 
@@ -666,7 +663,7 @@ get '/clearlogfile' => sub ($c) {
     my $file = app->log->path;
     truncate $file, 0;
 
-    $log->debug("log file cleared");
+    app->log->debug("log file cleared");
 
     $c->flash(message => "logfile cleared");
     $c->redirect_to("/logfile");
@@ -681,47 +678,58 @@ websocket '/log/:node/<game>-ws' => sub {
     my $node = $self->stash('node');
     my $game = $self->stash('game');
 
+    my $user = $self->yancy->auth->current_user->{'username'};
+
     my $loop;
 
     $self->inactivity_timeout(600);
 
-    $log->debug("reading $game on $node logfile via websocket");
+    app->log->info("openeing websocket for $user to read $game logfile on $node");
 
-    $self->on(json => sub {
-         my ($c, $hash) = @_;
-         #$hash->{cmd} = "echo: $hash->{cmd}";
-         sendCommand( command => $hash->{cmd}, game => $game, node => $node, ssh_master  => $config->{'minion_ssh_master'} );
-         $c->send( $game . "@" . $node . " :~ " . $hash->{cmd} );
-         $log->warn("reply via websocket");
-    });
-    
-    $self->on(finish => sub ($ws, $code, $reason) {
-        $log->debug("WebSocket closed with status $code.");
-        Mojo::IOLoop->remove($loop);
-    });
 
     my $send_data;
+
     $send_data = sub {
+
+        app->log->debug("$$ websocket: polling $game on $node ");
+
         my $logdata     = readLog(
             node        => $node,
             game        => $game,
+            line_count  => $line_count,
             ssh_master  => $config->{'ssh_master'}
         );
-        
-        $log->debug("$$ websocket: polling $game on $node ");
-        
-        $results = updatePage_game( 
-                    logdata     => $logdata,
-                    line_count  => $results->{'line_count'},
-                 );
-                 
-        if ( $results->{'new_content'} ) {
-         $self->send($results->{'new_content'});
+
+        foreach my $content ( split ( /\n/, ( $logdata) ) ) {
+            ++$line_count;
+            $content = '<div>' . $content . "</div>\n";
+
+            $self->send( $content );
         }
-    };
+   };
+
+    $self->on(json => sub {
+         my ($c, $hash) = @_;
+
+         sendCommand(   command     => $hash->{cmd},
+                        game        => $game,
+                        node        => $node,
+                        ssh_master  => $config->{'minion_ssh_master'}
+         );
+
+         $c->send( $game . "@" . $node . " :~ " . $hash->{cmd} );
+         app->log->warn("$user sent console command to $game on $node:");
+         app->log->warn(" # $hash->{cmd}");
+    });
+
+    $self->on(finish => sub ($ws, $code, $reason) {
+        app->log->info("WebSocket closed with status $code.");
+        Mojo::IOLoop->remove($loop);
+    });
+
 
     $send_data->();
-    $loop = Mojo::IOLoop->recurring(2, $send_data);
+    $loop = Mojo::IOLoop->recurring($config->{'poll_interval'}, $send_data);
 };
 
 
@@ -729,8 +737,8 @@ get '/log/:node/:game' => sub ($c) {
 
     my $game = $c->stash('game');
     my $node = $c->stash('node');
-    $log->debug("reading $game logfile");
-    
+    app->log->debug("reading $game logfile");
+
     $c->stash(
         node    => $node,
         game    => $game
@@ -746,7 +754,7 @@ any '*' => sub ($c) {
     my $url = $c->req->url->to_abs;
     my $ip  = $c->remote_addr;
     my $user = $c->yancy->auth->current_user->{'username'};
-    $log->warn("possible snooping: $user \[$ip\] $url");
+    app->log->warn("possible snooping: $user \[$ip\] $url");
     $c->flash( error => "page doesn't exist" );
     $c->redirect_to("/");
 };
@@ -757,7 +765,7 @@ any '*' => sub ($c) {
 ###########################################################
 
 sub updatePage_game {
-    my %args = ( 
+    my %args = (
        line_count   => '',
        iteration    => '',
        logdata      => '',
@@ -766,7 +774,7 @@ sub updatePage_game {
        file         => '',
        new_content  => '',
     @_ );
-    
+
     #open(FILE, $args{'logdata'} );
 
     my $iteration = 0;
@@ -775,10 +783,10 @@ sub updatePage_game {
     foreach ( split ( /\n/, ( $args{'logdata'} ) ) ) {
         ++$iteration;
 
-        if ( $iteration > $args{'line_count'} ) {
+        #if ( $iteration > $args{'line_count'} ) {
             ++$args{'line_count'};
             $new_content = $new_content . '<div>' . $_ . "</div>\n";
-        }
+        #}
     }
 
     $args{'iteration'}   = $iteration;
@@ -789,7 +797,7 @@ sub updatePage_game {
 
 
 sub updatePage {
-    my %args = ( 
+    my %args = (
        line_count   => '',
        iteration    => '',
        ip           => '',
@@ -798,7 +806,7 @@ sub updatePage {
        file         => '',
        new_content  => '',
     @_ );
-    
+
     open(FILE, $args{'file'} );
 
     my $iteration = 0;
@@ -880,11 +888,11 @@ sub update {
 
     # Install Latest version
     my $user = $settings->{$game}{'node_usr'};
-    
+
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
-    
+
     $project_url = $project_url . '/downloads/' . $file_name;
     my $cmd = 'wget -c ' . $project_url . ' -O ' . $path;
 
@@ -905,13 +913,18 @@ sub update {
 }
 
 sub readLog {
-    my %args = (
-        game => '',
-        node => '',
+    my %args        = (
+        game        => '',
+        node        => '',
+        line_count  => '1',
         @_,    # argument pair list goes here
     );
     my $game = $args{'game'} or return 1;
     my $node = $args{'node'} or return 1;
+
+    $args{'line_count'} = '1' unless $args{'line_count'};
+
+    app->log->debug("line count: $args{'line_count'}");
 
     my $return_string;
 
@@ -953,9 +966,15 @@ sub readLog {
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    my  $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
-        $cmd .= " cat ~/$game/game_files/screenlog.0";
+    #$line_count = 1;
 
+    my  $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
+        $cmd .= q(sed -n ');
+        $cmd .= $args{'line_count'};
+        $cmd .= q(,$p' < ~/);
+        $cmd .= qq($game/game_files/screenlog.0);
+
+    app->log->debug($cmd);
 
     my  $logfile  = $ssh->{'link'}->capture($cmd);
 
@@ -994,15 +1013,15 @@ sub readFromDB {
     my $field  = $args{'field'};
     my $value  = $args{'value'};
 
-    $log->debug("sub readFromDB: PID: $pid Connecting to DB table:$table column:$column field:$field value:$value" );
-    
+    app->log->debug("sub readFromDB: PID: $pid Connecting to DB table:$table column:$column field:$field value:$value" );
+
     $dbh{$pid} = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
        "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1, AutoCommit => 0 } );
 
     my ( $ref, $ref_name, $ref_value );
     my $result = {};
     my %result = %$result;
- 
+
     my $select = '*';
     $select = $column if ( $args{'hash_ref'} eq 'false' );
 
@@ -1013,15 +1032,15 @@ sub readFromDB {
     }
 
     $query .= ";";
-    $log->debug("$query");
+    app->log->debug("$query");
 
     my $sth = $dbh{$pid}->prepare($query);
-    $sth->execute(); 
+    $sth->execute();
 
     while ( $ref = $sth->fetchrow_hashref() ) {
         my $index_name;
         $index_name = $column unless $index_name = $ref->{$column};
-           
+
         foreach ( @{ $sth->{NAME} } ) {
             $ref_name                       = $_;
             $ref_value                      = $ref->{$ref_name};
@@ -1031,8 +1050,8 @@ sub readFromDB {
 
     $sth->finish();
     $dbh{$pid}->disconnect;
-    $log->debug("DB query complete");
-        
+    app->log->debug("DB query complete");
+
     if ( $args{'hash_ref'} eq 'true' ) {
         return \%result;
     }
@@ -1075,20 +1094,20 @@ sub checkIsOnline {
 
     if ( $args{'node'} ) {
         @nodes_to_check = $args{'node'};
-        $log->debug("Using specified node");
+        app->log->debug("Using specified node");
     }
     else {
         @nodes_to_check = ( sort keys %{$enabledNodes} );
-        $log->debug("Using nodes from DB");
+        app->log->debug("Using nodes from DB");
     }
 
-    $log->debug("Query: \[@nodes_to_check\]");
+    app->log->debug("Query: \[@nodes_to_check\]");
 
 
     foreach my $this_node (@nodes_to_check) {
 
         $return_hash{$this_node} = {};
-        $log->debug("Query $this_node for games...");
+        app->log->debug("Query $this_node for games...");
 
         my $ip = $enabledNodes->{$this_node}{'ip'};
 
@@ -1133,7 +1152,7 @@ sub checkIsOnline {
 
         my $game = $temp_hash{$result}{'game'};
 
-        $log->warn("[!!] $game is running multiple times!")
+        app->log->warn("[!!] $game is running multiple times!")
           if ( $return_hash->{$list_by}{$game} );
 
         $return_hash{$list_by}{$game}{'node'} = $temp_hash{$result}{'node'};
@@ -1149,26 +1168,26 @@ sub checkIsOnline {
     }
 
 #     my $t_shoot = Dumper(%return_hash);
-#     $log->debug($t_shoot);
-    
+#     app->log->debug($t_shoot);
+
     ## Load the offline nodes
     foreach my $offline (@dead_nodes) {
         $return_hash{$offline}{'offline'}{'offline'} = 'true';
     }
-    
+
     if ( $args{'game'} ) {
 
         if ( $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} ) {
-            $log->debug( "Found " . $args{'game'} . " on " 
+            app->log->debug( "Found " . $args{'game'} . " on "
                 . $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} . " "
                 . $return_hash{ $args{'game'} }{ $args{'game'} }{'ip'}
             );
-            
+
             return "$return_hash{ $args{'game'} }{ $args{'game'} }{'node'}";
         }
 
         else {
-            $log->debug( "$args{'game'} not found on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}");
+            app->log->debug( "$args{'game'} not found on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}");
             return 0;
         }
     }
@@ -1223,7 +1242,7 @@ sub registerGame {
         return "This is a bungee instance, exiting";
     }
 
-    $log->debug("Registering $game on the network with $gateway");
+    app->log->debug("Registering $game on the network with $gateway");
 
     $cmd = "servermanager delete " . $game . "^M";
 
@@ -1289,7 +1308,7 @@ sub deregisterGame {
         hash_ref => 'false'
     );
 
-    $log->debug("Registering $game on the network with $gateway");
+    app->log->debug("Registering $game on the network with $gateway");
 
     $cmd = "servermanager delete " . $game . "^M";
 
@@ -1383,7 +1402,7 @@ sub sendCommand {
     my ( $results, @results );
     my $user = $settings->{$game}{'node_usr'};
 
-    $log->debug("Sending command: $command to $game on $ip");
+    app->log->debug("Sending command: $command to $game on $ip");
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );   #or die "Error establishing SSH" ;
 
@@ -1392,7 +1411,7 @@ sub sendCommand {
     $ssh->{'link'}->system(
         "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
 
-    $log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
+    app->log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
           . $command
           . "\"^M'" );
 
@@ -1405,7 +1424,7 @@ sub sendCommand {
 #    $results = $results if /\S/;
 #    $results = $results if s/[^[:ascii:]]//g, $results;
 #    foreach (@results) {
-#        $log->debug("$game SCREEN: $_");
+#        app->log->debug("$game SCREEN: $_");
 #    }
     return;
 #    return $results;
@@ -1429,10 +1448,10 @@ sub connectSSH {
     $args{'link'}       = $ssh_master{ $PID.$args{'user'}.$args{'ip'} };
 
     if ( $args{'ssh_master'} eq 'true' && defined( $args{'link'} ) ) {
-        $log->debug("Master socket exists $PID.$args{'user'}.$args{'ip'}");
-        
+        app->log->debug("Master socket exists $PID.$args{'user'}.$args{'ip'}");
+
         if ( $args{'link'}->check_master ) {
-            $log->debug("Master socket is HEALTHY $PID.$args{'user'}.$args{'ip'}");
+            app->log->debug("Master socket is HEALTHY $PID.$args{'user'}.$args{'ip'}");
             return \%args;
         }
         else {
@@ -1440,12 +1459,12 @@ sub connectSSH {
             $args{'link'} = {};
         }
     }
-    
+
     if ( $args{'ssh_master'} eq 'true' && not defined( $args{'link'} ) ) {
-        $log->debug("Creating NEW SSH master socket $PID.$args{'user'}.$args{'ip'}");
+        app->log->info("Creating NEW SSH master socket $PID.$args{'user'}.$args{'ip'}");
 
         my $socket      = '.ssh_master.' . $args{'connection'} . "_" . $PID;
-        $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
+        $args{'link'}   = Net::OpenSSH->new( $args{'connection'},
             batch_mode  => 1,
             timeout     => 60,
             async       => 1,
@@ -1455,12 +1474,12 @@ sub connectSSH {
 
         $ssh_master{ $PID.$args{'user'}.$args{'ip'} } = $args{'link'};
     }
-        
+
     if ( $args{'ssh_master'} ne 'true' ) {
-        $log->debug("Creating TEMP SSH socket");
+        app->log->debug("Creating TEMP SSH socket");
         # Use temp ssh - more stable but slower
         my $socket      = '.ssh_master.' . $args{'connection'} . "_" . $PID;
-        $args{'link'}   = Net::OpenSSH->new( $args{'connection'}, 
+        $args{'link'}   = Net::OpenSSH->new( $args{'connection'},
             batch_mode  => 1,
             timeout     => 60,
             async       => 1,
@@ -1470,11 +1489,11 @@ sub connectSSH {
 
     if ( $args{'link'}->error ) {
         $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
-        $log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
+        app->log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
         $args{'link'} = undef;
     }
     else {
-        $log->debug("SSH established " . $args{'connection'});
+        app->log->debug("SSH established " . $args{'connection'});
         return \%args;
     }
 }
@@ -1490,38 +1509,20 @@ sub haltGame {
     my $game = $args{'game'};
     my $node = $args{'node'};
 
-    $log->info("Halting: $game");
+    app->log->info("Halting: $game");
 
     sendCommand( command => "stop^Mend", game => $game, node => $node, ssh_master => $args{'ssh_master'} );
 
     sleep(30);
 
     unless ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
-        $log->info("Halt $game succeeded");
+        app->log->info("Halt $game succeeded");
         return "Halt $game succeeded";
     }
     else {
-        $log->info("Failed to halt $game");
+        app->log->info("Failed to halt $game");
         return "Failed to halt $game";
     }
-}
-
-sub configLogger {
-
-    $log_conf = qq{
-        log4perl.category                   = $config->{'log_level'}, Logfile, Screen
-
- 
-        log4perl.appender.Logfile           = Log::Log4perl::Appender::File
-        log4perl.appender.Logfile.filename  = deploy.log
-        log4perl.appender.Logfile.layout    = Log::Log4perl::Layout::PatternLayout
-        log4perl.appender.Logfile.layout.ConversionPattern = [%d{yyyy-MM-d HH:mm:ss.SSSSS}] [%P] [%p] %R ms %m%n 
- 
-        log4perl.appender.Screen            = Log::Log4perl::Appender::Screen
-        log4perl.appender.Screen.stderr     = 0
-        log4perl.appender.Screen.layout    = Log::Log4perl::Layout::PatternLayout
-        log4perl.appender.Screen.layout.ConversionPattern = [%r|%R]ms [%p] {%P}:%L %m%n 
-    };
 }
 
 
@@ -1568,20 +1569,20 @@ sub storeGame {
         hash_ref => 'false'
     );
 
-    $log->info("store Gameserver: $game");
+    app->log->info("store Gameserver: $game");
 
     $user  = $settings->{$game}{'node_usr'};
     $suser = $settings->{$game}{'store_usr'};
 
     if (!$user || !$suser || !$ip || !$sip ) {
-        $log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
+        app->log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
         return "Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip";
     };
 
     unless ( $settings->{$game}{'isBungee'} ) {
-       sendCommand( 
-            command     => 'say Backup starting...^Msave-off^Msave-all', 
-            game        => $game, 
+       sendCommand(
+            command     => 'say Backup starting...^Msave-off^Msave-all',
+            game        => $game,
             node        => $settings->{$game}{'node'},
             ip          => $ip,
             ssh_master  => $args{'ssh_master'}
@@ -1594,42 +1595,39 @@ sub storeGame {
 
     $cp_to = $settings->{$game}{"store_path"} . "/";
 
-    $log->debug(" $cp_from $cp_to ");
+    app->log->debug(" $cp_from $cp_to ");
 
     my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    $log->debug(
-                "rsync -auv --delete --exclude='plugins/*jar' 
-                -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to"
-    );
-    my $output =
-      $ssh->{'link'}->capture(
-                "rsync -auv --delete --exclude='plugins/*jar' --exclude='screenlog.0' 
-                -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no 
-                -o BatchMode=yes' $cp_from $cp_to"
-    );
-      
+    my $rsync_cmd  = q(rsync -auv --delete --exclude='plugins/*jar' --exclude='screenlog.0' );
+       $rsync_cmd .= q(-e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no );
+       $rsync_cmd .= qq(-o BatchMode=yes' $cp_from $cp_to );
+
+    app->log->debug("$rsync_cmd");
+
+    my $output = $ssh->{'link'}->capture("$rsync_cmd");
+
     unless ( $settings->{$game}{'isBungee'} ) {
-        sendCommand( 
-            command     => "say Backup complete^Msave-on", 
-            game        => $game, 
+        sendCommand(
+            command     => "say Backup complete^Msave-on",
+            game        => $game,
             node        => $settings->{$game}{'node'},
             ip          => $ip,
             ssh_master  => $args{'ssh_master'}
         );
 
-        sendCommand( 
-            command     => "co purge t:30d", 
-            game        => $game, 
+        sendCommand(
+            command     => "co purge t:30d",
+            game        => $game,
             node        => $settings->{$game}{'node'},
             ip          => $ip,
             ssh_master  => $args{'ssh_master'}
         );
         sleep(0.5);
     };
-    
+
     return $output;
 }
 
@@ -1680,23 +1678,23 @@ sub bootGame {
     $invocation .= " nogui server";
     $invocation =~ s/\n+/ /g;
 
-    $log->trace("$invocation");
+    app->log->trace("$invocation");
     $user = $settings->{$game}{'node_usr'};
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
-    
+
     $ssh->{'link'}->system("$invocation");
 
     sleep(10);
 
     if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
-        $log->info("Started $game");
+        app->log->info("Started $game");
         return 0;
     }
     else {
-        $log->info("Failed to start $game");
+        app->log->info("Failed to start $game");
         return 1;
     }
 }
@@ -1743,13 +1741,13 @@ sub deployGame {
         hash_ref => 'false'
     );
 
-    $log->info("deployGamerserver: $game");
+    app->log->info("deployGamerserver: $game");
 
     $user  = $settings->{$game}{'node_usr'};
     $suser = $settings->{$game}{'store_usr'};
-    
+
     if (!$user || !$suser || !$ip || !$sip ) {
-        $log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
+        app->log->warn("Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip");
         return "Essential variable missing user:$user store_user:$suser ip:$ip store_ip:$sip";
     }
 
@@ -1760,12 +1758,12 @@ sub deployGame {
 
     my $rsync_cmd  = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no ";
        $rsync_cmd .= "-o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
-    $log->debug(" $rsync_cmd ");
+    app->log->debug(" $rsync_cmd ");
 
     my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
-    
+
     my $output = $ssh->{'link'}->capture("$rsync_cmd");
     return $output;
 }
@@ -1830,14 +1828,14 @@ errors    Poorly or incorrectly negotiated mode and speed, or damaged network ca
 dropped    Possibly due to iptables or other filtering rules, more likely due to lack of network buffer memory.
 overrun    Number of times the network interface ran out of buffer space.
 carrier    Damaged or poorly connected network cable, or switch problems.
-collsns    Number of collisions, which should always be zero on a switched LAN. 
-         Non-zero indicates problems negotiating appropriate duplex mode. 
+collsns    Number of collisions, which should always be zero on a switched LAN.
+         Non-zero indicates problems negotiating appropriate duplex mode.
          A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
-    
+
         $output{'1_cpu'}   = $ssh->{'link'}->capture(@cpu_cmd);
         $output{'3_mem'}   = $ssh->{'link'}->capture(@mem_cmd);
         $output{'5_net'}   = $ssh->{'link'}->capture($net_cmd) . $iperf;
@@ -1875,12 +1873,12 @@ __DATA__
         background-repeat: repeat-x;
         background-attachment: fixed;
     }
-    
+
     .custom {
     width: 78px !important;
     margin-right: 3px;
     }
-    
+
     #top-alert {
         position: fixed;
         top: 0;
@@ -1888,13 +1886,13 @@ __DATA__
         z-index: 99999;
     }
     .data a, .data span, .data tr, .data td { white-space: pre; }
-    
-    #command-content{  text-indent: -26px; 
+
+    #command-content{  text-indent: -26px;
                 padding-left: 26px; font-size: medium; color: #009933;
                 }
 
   </style>
-  
+
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
   <symbol id="check-circle-fill" fill="currentColor" viewBox="0 0 16 16">
     <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
@@ -1906,7 +1904,7 @@ __DATA__
     <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
   </symbol>
 </svg>
- 
+
     % my $flash_message = $c->flash('message');
     % if ($flash_message) {
     <div id="top-alert" class="alert alert-primary alert-dismissible fade show" role="alert">
@@ -1929,7 +1927,7 @@ __DATA__
 
 <nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark">
   <div class="container-fluid">
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01" 
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01"
         aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
@@ -1976,8 +1974,8 @@ __DATA__
         %= content
     </main>
   </div>
-  
-  
+
+
 <footer class="bg-dark text-center text-white mt-auto">
   <!-- Grid container -->
   <div class="container p-4 pb-0">
@@ -2039,21 +2037,21 @@ __DATA__
         <div class="alert alert-success" role="alert">
           <h4 class="alert-heading">manage games</h4>
         </div>
-      
+
         % my %nodes   = %$nodes;
         % my %history = %$history;
         % my %expected = %$expected;
-      
+
         % for my $node (sort keys %$nodes) {
           % if ( ! $nodes{$node}{'offline'} ) {
 
 
             <div class="media mt-2">
               <a href="/info/<%= $node %>" class="list-group-item-action list-group-item-light">
-                <img class="align-self-top mr-1 mt-2 mb-2" 
+                <img class="align-self-top mr-1 mt-2 mb-2"
                   src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
                   alt="Generic placeholder image" height="80">
-                </img> 
+                </img>
                 <h3>
                     <%= $node %>
                 </h3>
@@ -2066,43 +2064,43 @@ __DATA__
         <h5 class="text-success">online</h5>
 
         </div>
-            % for my $game (sort keys %{$nodes{$node}}) {        
+            % for my $game (sort keys %{$nodes{$node}}) {
             <div class="row height: 40px">
-           
+
                 % my $online       = 'true'; # = $node{$game}{'online'};
                 % my $isLobby     = 'false'; # = $node{$game}{'isLobby'};
                 % my $isRestricted = 'false'; # = $node{$game}{'isRestricted'};
-                   
+
                 <div class="col d-flex justify-content-start mb-2 shadow">
-                    
+
                       <div class="media" >
                       <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3" 
+                        <img class="zoom align-self-top mr-3"
                           src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
                           alt="Generic placeholder image" height="35">
                         </image>
                       </a>
                       <a href="/log/<%= $node %>/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3" 
+                        <img class="zoom align-self-top mr-3"
                           src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
                           alt="Generic placeholder image" height="35">
                         </image>
                       </a>
-                        <img class="align-self-top mr-3" 
+                        <img class="align-self-top mr-3"
                           src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
                           alt="Generic placeholder image" height="25">
                           </h4> <%= $game %> </h4>
                         </image>
                       </div>
                 </div>
-            
+
                 % if (app->minion->lock($game, 0)) {
                 <div class="col d-flex justify-content-end mb-2 shadow">
                     <a class="ml-1 btn btn-sm btn-outline-secondary  custom
                         justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
                         href="/store/<%= $game %>/<%= $node %>"     role="button">store</a>
-                    <a class="ml-1 btn btn-sm btn-outline-info custom     
-                        justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network" 
+                    <a class="ml-1 btn btn-sm btn-outline-info custom
+                        justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
                         href="/link/<%= $game %>/<%= $node %>"      role="button">link</a>
                     <a class="ml-1 btn btn-sm btn-outline-info custom
                                 justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
@@ -2111,13 +2109,13 @@ __DATA__
                         justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
                         href="/halt/<%= $game %>/<%= $node %>"      role="button">halt</a>
                 </div>
-                % } else {                    
+                % } else {
                     <div class="col d-flex justify-content-end mb-2 shadow">
-                        <a class="ml-1 btn btn-sm btn-outline-danger  
+                        <a class="ml-1 btn btn-sm btn-outline-danger
                         justify-end" href="/minion/locks"      role="button">locked while task is running</a>
                     </div>
-                % }        
-            </div>   
+                % }
+            </div>
             % }
 
 
@@ -2126,25 +2124,25 @@ __DATA__
         <h5 class="text-danger">offline</h5>
 
         </div>
-            % for my $game (sort keys %{$expected}) {     
+            % for my $game (sort keys %{$expected}) {
                 % if ( $expected{$game}{'node'} eq $node && ! ${nodes}{$node}{$game}{'pid'} ) {
-             
+
                 <div class="row height: 40px">
                    <div class="col d-flex justify-content-start mb-2 shadow ">
                     <div class="media" >
                       <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3" 
+                        <img class="zoom align-self-top mr-3"
                           src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
                           alt="Generic placeholder image" height="35">
                         </image>
                       </a>
                       <a href="/log/<%= $node %>/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3" 
+                        <img class="zoom align-self-top mr-3"
                           src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
                           alt="Generic placeholder image" height="35">
                         </image>
                       </a>
-                      <img class="align-self-top mr-3" 
+                      <img class="align-self-top mr-3"
                         src="http://www.splatage.com/wp-content/uploads/2022/08/minecraft-chest-icon-19.png"
                         alt="Generic placeholder image" height="30">
                         </h4> <%= $game %> </h4>
@@ -2156,17 +2154,17 @@ __DATA__
                     % if (app->minion->lock($game, 0)) {
                         <div class="col d-flex justify-content-end mb-2 shadow">
                         <!--
-                            <a class="ml-1 btn btn-sm btn-outline-dark    custom   
+                            <a class="ml-1 btn btn-sm btn-outline-dark    custom
                                 justify-end" data-toggle="tooltip" data-placement="top" title="migrate to another node"
                                 href="/move/<%= $game %>/<%= $node %>"    role="button">move</a>
-                            <a class="ml-1 btn btn-sm btn-outline-dark     custom  
+                            <a class="ml-1 btn btn-sm btn-outline-dark     custom
                                 justify-end" data-toggle="tooltip" data-placement="top" title="update server and plugins"
                                 href="/update/<%= $game %>/<%= $node %>"    role="button">update</a>
-                           -->     
+                           -->
                             <a class="ml-1 btn btn-sm btn-outline-secondary  custom
                                 justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
                                 href="/deploy/<%= $game %>/<%= $node %>"    role="button">deploy</a>
-                            <a class="ml-1 btn btn-sm btn-outline-info     custom  
+                            <a class="ml-1 btn btn-sm btn-outline-info     custom
                                 justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
                                 href="/drop/<%= $game %>/<%= $node %>"      role="button">drop</a>
                             <a class="ml-1 btn btn-sm btn-success    custom
@@ -2175,19 +2173,19 @@ __DATA__
                         </div>
                     % } else {
                     <div class="col d-flex justify-content-end mb-2 shadow">
-                        <a class="ml-1 btn btn-sm btn-outline-danger 
+                        <a class="ml-1 btn btn-sm btn-outline-danger
                         justify-end" data-toggle="tooltip" data-placement="top" title="for safety on a single job can run on each game"
                         href="/minion/locks"      role="button">locked while task is running</a>
                      </div>
                     % }
-                 
-                </div>  
+
+                </div>
                 % }
             %}
         % }
     % }
-  
-  </div>  
+
+  </div>
 </body>
 </html>
 
@@ -2244,31 +2242,31 @@ __DATA__
 <body class="m-0 border-0">
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
-      
-      
+
+
       % my %nodes    = %$nodes;
       % my %expected = %$expected;
       % for my $node (sort keys %$nodes) {
       % if ( ! $nodes{$node}{'offline'} ) {
 
-        <div class="col-12 col-md-3 shadow bg-medium mt-4 mb-2 rounded">  
-     
+        <div class="col-12 col-md-3 shadow bg-medium mt-4 mb-2 rounded">
+
           <div class="media mt-2 mb-2">
 
-            <img class="align-self-top mr-1 mt-2 mb-2" 
+            <img class="align-self-top mr-1 mt-2 mb-2"
               src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
               alt="Generic placeholder image" height="80">
                 <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
-                
+
                   <%= $node %>
 
                 </a>
-             </img>  
+             </img>
 
                 <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
                   % for my $game (sort keys %{$nodes{$node}}) {
                     % if ( $game ne 'offline' ) {
-                                
+
                       <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
@@ -2282,55 +2280,55 @@ __DATA__
                     % }
                   % }
                 </div>
-                
-           
-           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">     
+
+
+           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
                 %for my $game (sort keys %{$expected}) {
-                    % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) { 
-                    
+                    % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) {
+
                      <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
                         <span style="float:right; mr-1" class="mr-1">
                         <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
                         </span>
-                   
+
                       </a>
             % }
         % }
             </div>
            </div>
-         </div>       
+         </div>
          % }
         % }
         <hr>
-        
+
    <div class="alert alert-danger" role="alert">
     <h4 class="alert-heading">offline nodes</h4>
   </div>
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
-      
-      
+
+
       %  %nodes    = %$nodes;
       %  %expected = %$expected;
       % for my $node (sort keys %$nodes) {
       % if ( $nodes{$node}{'offline'} ) {
-        <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">  
-     
+        <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">
+
           <div class="media mt-2">
-            <img class="align-self-top mr-1 mt-2 mb-2" 
+            <img class="align-self-top mr-1 mt-2 mb-2"
               src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
               alt="Generic placeholder image" height="80">
                 <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
-                
+
                   <%= $node %>
                 </a>
-             </img>  
+             </img>
                 <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
                   % for my $game (sort keys %{$nodes{$node}}) {
                     % if ( $game ne 'offline' ) {
-                                
+
                       <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
@@ -2344,29 +2342,29 @@ __DATA__
                     % }
                   % }
                 </div>
-                
-           
-           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">     
+
+
+           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
                 %for my $game (sort keys %{$expected}) {
-                   % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) { 
-                    
+                   % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) {
+
                      <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
                         <span style="float:right; mr-1" class="mr-1">
                         <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
                         </span>
-                   
+
                      </a>
                    % }
                 % }
             </div>
            </div>
-         </div>       
+         </div>
          % }
         % }
         <hr>
-        
+
   </div>
 </body>
 </html>
@@ -2433,7 +2431,7 @@ pre {
   align-items: baseline;
   margin: 0;
   font: 1rem Inconsolata, monospace;
-  text-shadow: 0 0 5px #C8C8C8; 
+  text-shadow: 0 0 5px #C8C8C8;
 }
 
 
@@ -2495,18 +2493,18 @@ pre {
         <div class="alert alert-success" role="alert">
           <h4 class="alert-heading">game</h4>
         </div>
-      % my @files = @$files; 
+      % my @files = @$files;
 
 <h2> Files </h2>
 <%= @files %> and directories
 
-% foreach my $line (@files) { 
-<div> <%= $line %> </div> 
-%    } 
+% foreach my $line (@files) {
+<div> <%= $line %> </div>
+%    }
 <hr>
 
 
-    </div>  
+    </div>
 </body>
 </html>
 
@@ -2524,9 +2522,9 @@ pre {
           <h4 class="alert-heading"> debug info for <%= $node %></h4>
         </div>
 %   my %results = %$results;
-%  foreach my $title (sort keys %results) { 
+%  foreach my $title (sort keys %results) {
         <h3> <%= $title %> </h3> <hr>
-    
+
 %      my $info    =  $results{$title};
 %#         $info    =~ s/ /\&nbsp;/g;
 %      my @lines   = split(/\n/, $info);
@@ -2654,7 +2652,7 @@ pre {
                 $('html, body').animate({scrollTop: $(document).height()}, 'slow');
              }
             $('html, body').animate({scrollTop: $(document).height()}, 'slow');
-            
+
       function send(e) {
         if (e.keyCode !== 13) {
            return false;
