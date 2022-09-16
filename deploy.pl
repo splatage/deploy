@@ -645,7 +645,7 @@ websocket '/logfile-ws' => sub {
     };
 
     $send_data->();
-    Mojo::IOLoop->recurring(5, $send_data);
+    Mojo::IOLoop->recurring(2, $send_data);
 };
 
 
@@ -671,11 +671,15 @@ websocket '/log/:node/<game>-ws' => sub {
     $self->inactivity_timeout(900);
 
     $log->debug("reading $game on $node logfile via websocket");
-    
+
     $self->on(json => sub {
-        my ($self, $hash) = @_;
-        $hash->{msg} = "echo: $hash->{msg}";
-        $self->send({json => $hash});
+         my ($c, $hash) = @_;
+         #$hash->{cmd} = "echo: $hash->{cmd}";
+         
+         sendCommand( command => $hash->{cmd}, game => $game, node => $node, ssh_master  => $config->{'ssh_master'} );
+         
+         #$c->send({json => $hash});
+         $log->warn("reply via websocket");
     });
 
     my $send_data;
@@ -697,7 +701,7 @@ websocket '/log/:node/<game>-ws' => sub {
     };
 
     $send_data->();
-    Mojo::IOLoop->recurring(5, $send_data);
+    Mojo::IOLoop->recurring(3, $send_data);
 };
 
 
@@ -1363,8 +1367,8 @@ sub sendCommand {
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );   #or die "Error establishing SSH" ;
 
-    $ssh->{'link'}->system("screen -p 0 -S $game -X clear");
-    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
+#    $ssh->{'link'}->system("screen -p 0 -S $game -X clear");
+#    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
     $ssh->{'link'}->system(
         "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
 
@@ -1372,19 +1376,19 @@ sub sendCommand {
           . $command
           . "\"^M'" );
 
-    Time::HiRes::sleep(0.05);
+#    Time::HiRes::sleep(0.05);
 
-    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
-    $results = $ssh->{'link'}->capture("cat $game/game_files/hardcopy.0");
+#    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
+#    $results = $ssh->{'link'}->capture("cat $game/game_files/hardcopy.0");
 
-    @results = split( '\n', $results );
-    $results = $results if /\S/;
-    $results = $results if s/[^[:ascii:]]//g, $results;
-    foreach (@results) {
-        $log->debug("$game SCREEN: $_");
-    }
-
-    return $results;
+#    @results = split( '\n', $results );
+#    $results = $results if /\S/;
+#    $results = $results if s/[^[:ascii:]]//g, $results;
+#    foreach (@results) {
+#        $log->debug("$game SCREEN: $_");
+#    }
+    return;
+#    return $results;
 }
 
 
@@ -2166,25 +2170,6 @@ __DATA__
 
 <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 
-<script type="text/javascript">
-  $(document).ready(function () {
-    %# Scroll down to the bottom
-   <!--  $('html, body').animate({scrollTop: $(document).height()},'slow'); -->
-
-    %# Schedule the first update in five seconds
-    setTimeout("updatePage()",10000);
-  });
-
-  %# This function will update the page
-  function updatePage () {
-    $('#command-content').load(location.reload(true) + ' #command-content>div');
-    $('html, body').animate({scrollTop: $(document).height()});
-
-    %# Schedule the next update in five seconds
-    setTimeout("updatePage()",10000);
-  }
-
-</script>
 <script>
     document.addEventListener("DOMContentLoaded", function (event) {
         var scrollpos = sessionStorage.getItem('scrollpos');
@@ -2457,25 +2442,6 @@ pre {
 
 <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 
-<script type="text/javascript">
-  $(document).ready(function () {
-    %# Scroll down to the bottom
-    $('html, body').animate({scrollTop: $(document).height()},'slow');
-
-    %# Schedule the first update in five seconds
-    setTimeout("updatePage()",300000);
-  });
-
-  %# This function will update the page
-  function updatePage () {
-    $('#command-content').load(location.reload(true) + ' #command-content>div');
-    $('html, body').animate({scrollTop: $(document).height()});
-
-    %# Schedule the next update in five seconds
-    setTimeout("updatePage()",300000);
-  }
-
-</script>
 <script>
     document.addEventListener("DOMContentLoaded", function (event) {
         var scrollpos = sessionStorage.getItem('scrollpos');
@@ -2637,42 +2603,47 @@ pre {
 
    <div id='command-content' class="text-wrap container-sm text-break">
         %# This is the command output
-   </div> 
-  </div>
+   </div>
+ </div>
 
 <div class="input-group mb-3 container bg-secondary shadow-lg bg-body rounded">
   <span class="input-group-text"><%= $game %>@<%= $node %> :~ </span>
   <div class="form-floating">
-    <input type="text" class="form-control" id="floatingInputGroup1" placeholder="command">
-    <label for="floatingInputGroup1">command console</label>
+    <input type="text" class="form-control" id="cmd" placeholder="cmd">
+    <label for="cmd">command console</label>
   </div>
 </div>
 
 
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"></script>
-      <script type="text/javascript">
-        $(document).ready(function () {
-            %# Grab our current location
+    <script type="text/javascript">
+      $(document).ready(function () {
             var ws_host = window.location.href;
-            %# We are requesting websocket data...
-            %# So change the http: part to ws:
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
-            %# I also tacked on the "-ws" at the end
-            %# Connect the remote socket
             var socket = new WebSocket(ws_host);
-            %# When we recieve data from the websocket do the following
-            %# with "msg" as the content.
             socket.onmessage = function (msg) {
-                %# Append the new content to the end of our page
                 $('#command-content').append(msg.data);
-                %# Scroll down to the bottom
                 $('html, body').animate({scrollTop: $(document).height()}, 'slow');
              }
-            %# Scroll down to the bottom
             $('html, body').animate({scrollTop: $(document).height()}, 'slow');
-        });
+      
+
+      function send(e) {
+        if (e.keyCode !== 13) {
+           return false;
+        }
+        var cmd = document.getElementById('cmd').value;
+        document.getElementById('cmd').value = '';
+        console.log('send', cmd);
+        socket.send(JSON.stringify({cmd: cmd}));
+      }
+
+      document.getElementById('cmd').addEventListener('keypress', send);
+      document.getElementById('cmd').focus();
+      });
+
     </script>
 </body>
 </html>
