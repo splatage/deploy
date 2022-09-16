@@ -625,7 +625,7 @@ websocket '/logfile-ws' => sub {
     my $ip;
     my $user;
 
-    $self->inactivity_timeout(300);
+    $self->inactivity_timeout(900);
 
     $log->debug("reading logfile via websocket");
 
@@ -668,7 +668,7 @@ websocket '/log/:node/<game>-ws' => sub {
     my $node = $self->stash('node');
     my $game = $self->stash('game');
 
-    $self->inactivity_timeout(300);
+    $self->inactivity_timeout(900);
 
     $log->debug("reading $game on $node logfile via websocket");
 
@@ -1903,32 +1903,32 @@ __DATA__
     <a class="navbar-brand" href="/">
       <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
     </a>
-    
+
 
    <div class="container" id="navbarNav">
-      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+      <ul class="navbar-nav me-auto mb-2 mb-sm-0 nav-tabs">
       
       % if ( $c->yancy->auth->current_user ) {
         <li class="nav-item">
-          <a class="nav-link active" aria-current="page" href="/">home</a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/"><h6>home</h6></a>
         </li>
         <li class="nav-item">
-          <a class="nav-link" href="/yancy">settings</a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/yancy"><h6>settings</h6></a>
         </li>
         <li class="nav-item">
-          <a class="nav-link" href="/minion">minions</a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/minion"><h6>minions</h6></a>
         </li>
         <li class="nav-item">
-          <a class="nav-link" href="/status">status</a>
-        </li>
-                <li class="nav-item">
-          <a class="nav-link" href="/reload">reload</a>
-        </li>
-                <li class="nav-item">
-          <a class="nav-link" href="/logfile">logfile</a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/status"><h6>status</h6></a>
         </li>
         <li class="nav-item">
-          <a class="nav-link" href="/yancy/auth/password/logout">exit</a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/reload"><h6>reload</h6></a>
+        </li>
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/logfile"><h6>logfile</h6></a>
+        </li>
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>exit</h6></a>
         </li>
             % }
     </ul>
