@@ -596,6 +596,7 @@ get '/move/:node/:game' => sub ($c) {
     );
 };
 
+
 get '/reload' => sub ($c) {
     my $ppid = getppid();
     my $ip = $c->remote_addr;
@@ -605,9 +606,8 @@ get '/reload' => sub ($c) {
     $c->redirect_to("/");
 };
 
+
 get '/logfile' => sub ($c) {
-
-
     $log->debug("retrieving logfile");
     $c->render(
         template => 'logfile'
@@ -616,8 +616,6 @@ get '/logfile' => sub ($c) {
 
 
 websocket '/logfile-ws' => sub {
-
-
     my $line_count;
     my $self = shift;
     my $file = app->log->path;
@@ -627,7 +625,7 @@ websocket '/logfile-ws' => sub {
     my $ip;
     my $user;
 
-    $self->inactivity_timeout(3600);
+    $self->inactivity_timeout(300);
 
     $log->debug("reading logfile via websocket");
 
@@ -648,9 +646,7 @@ websocket '/logfile-ws' => sub {
 
     $send_data->();
     Mojo::IOLoop->recurring(5, $send_data);
-
 };
-
 
 
 get '/clearlogfile' => sub ($c) {
@@ -663,6 +659,7 @@ get '/clearlogfile' => sub ($c) {
     $c->redirect_to("/logfile");
 };
 
+
 websocket '/log/:node/<game>-ws' => sub {
     my $line_count;
     my $self = shift;
@@ -671,14 +668,12 @@ websocket '/log/:node/<game>-ws' => sub {
     my $node = $self->stash('node');
     my $game = $self->stash('game');
 
+    $self->inactivity_timeout(300);
 
-    $self->inactivity_timeout(3600);
-
-    $log->debug("reading $game logfile via websocket");
+    $log->debug("reading $game on $node logfile via websocket");
 
     my $send_data;
     $send_data = sub {
-    
         my $logdata     = readLog(
             node        => $node,
             game        => $game,
@@ -696,8 +691,7 @@ websocket '/log/:node/<game>-ws' => sub {
     };
 
     $send_data->();
-    Mojo::IOLoop->recurring(10, $send_data);
-
+    Mojo::IOLoop->recurring(5, $send_data);
 };
 
 
@@ -706,11 +700,15 @@ get '/log/:node/:game' => sub ($c) {
     my $game = $c->stash('game');
     my $node = $c->stash('node');
     $log->debug("reading $game logfile");
+    
+    $c->stash(
+        node    => $node,
+        game    => $game
+    );
+
     $c->render(
         template => 'gamelog',
-        game     => $game,
-        node     => $node
-        );
+    );
 };
 
 
@@ -739,17 +737,17 @@ sub updatePage_game {
        new_content  => '',
     @_ );
     
-    open(FILE, $args{'logdata'} );
+    #open(FILE, $args{'logdata'} );
 
     my $iteration = 0;
     my $new_content = '';
 
-    while ($args{'logdata'}) {
+    foreach ( split ( /\n/, ( $args{'logdata'} ) ) ) {
         ++$iteration;
 
         if ( $iteration > $args{'line_count'} ) {
             ++$args{'line_count'};
-            $new_content = $new_content . "<div>" . $_ . "</div>";
+            $new_content = $new_content . '<div><small>' . $_ . "</small></div>\n";
         }
     }
 
@@ -781,7 +779,7 @@ sub updatePage {
 
         if ( $iteration > $args{'line_count'} ) {
             ++$args{'line_count'};
-            $new_content = $new_content . "<div>" . $_ . "</div>";
+            $new_content = $new_content . "<div><small>" . $_ . "</small></div>\n";
         }
     }
 
@@ -921,27 +919,27 @@ sub readLog {
     }
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
+
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    my $cmd = "[ -f ~/$game/game_files/screenlog.0 ] ";
-    $cmd .= "&& tail -5000 ~/$game/game_files/screenlog.0 | tac | ";
-    $cmd .= "sed '/Starting minecraft\\\|Enabled Waterfall/q' | tac";
+    my  $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
+        $cmd .= " cat ~/$game/game_files/screenlog.0";
 
-    my $log = $ssh->{'link'}->capture("$cmd");
-    $log =~ s/ /\&nbsp;/g;
-    my @lines = split( /\n/, $log );
 
-    foreach (@lines) {
-        $return_string .=
-          '<div style="width: 80rem;"><small>' . $_ . '</small></div>\n';
+    my  $logfile  = $ssh->{'link'}->capture($cmd);
+
+    my @lines = split( /\n/, $logfile );
+
+    foreach my $line (@lines) {
+        $line =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;
+        $line =~ s/\r//g;
+        $line =~ s/\007//g;
+        $line =~ s/[^[:print:]]//g;
+        $line =~ s/ /\&nbsp;/g;
+
+        $return_string .= $line . "\n";
     }
-
-    $return_string =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;
-    $return_string =~ s/\r//g;
-    $return_string =~ s/\007//g;
-    $return_string =~ s/[^[:print:]]+//g;
-
     return $return_string;
 }
 
@@ -1573,12 +1571,15 @@ sub storeGame {
     return $ssh->{'debug'} if $ssh->{'debug'};
 
     $log->debug(
-"rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to"
+                "rsync -auv --delete --exclude='plugins/*jar' 
+                -e 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes' $cp_from $cp_to"
     );
     my $output =
       $ssh->{'link'}->capture(
-"rsync -auv --delete --exclude='plugins/*jar' -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to"
-      );
+                "rsync -auv --delete --exclude='plugins/*jar' --exclude='screenlog.0' 
+                -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no 
+                -o BatchMode=yes' $cp_from $cp_to"
+    );
       
     unless ( $settings->{$game}{'isBungee'} ) {
         sendCommand( 
@@ -1843,12 +1844,13 @@ __DATA__
         background-size: cover;
         background-repeat: repeat-x;
         background-attachment: fixed;
-
     }
+    
     .custom {
     width: 78px !important;
     margin-right: 3px;
     }
+    
     #top-alert {
         position: fixed;
         top: 0;
@@ -1856,7 +1858,9 @@ __DATA__
         z-index: 99999;
     }
     .data a, .data span, .data tr, .data td { white-space: pre; }
+    #command-content{  text-indent: -26px; padding-left: 26px; }
   </style>
+  
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
   <symbol id="check-circle-fill" fill="currentColor" viewBox="0 0 16 16">
     <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
@@ -2577,7 +2581,7 @@ pre {
         </div>
       </div>
 
-   <div id='command-content'>
+   <div id='command-content' class="text-wrap container-lg text-break">
         %# This is the command output
     </div>
   </div>
@@ -2619,16 +2623,13 @@ pre {
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
         <div class="row d-flex justify-content-between alert alert-success" role="alert">
-          <div class="col-4">
-            <h4 class="alert-heading">server logfile</h4>
-          </div>
-          <div class="col-2">
-            <a class="btn btn-outline-success" href="/clearlogfile" role="button">clear logfile</a>
+          <div class="col-6">
+            <h4 class="alert-heading">logfile: <%= $game %> on <%= $node %></h4>
           </div>
         </div>
       </div>
 
-   <div id='command-content'>
+   <div id='command-content' class="text-wrap container-sm text-break">
         %# This is the command output
     </div>
   </div>
@@ -2659,6 +2660,4 @@ pre {
     </script>
 </body>
 </html>
-
-
 
