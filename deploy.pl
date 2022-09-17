@@ -757,9 +757,9 @@ get '/test' => sub ($c) {
         game => $game
     );
 
-    $c->render(
-        template => 'uploader',
-    );
+#    $c->render(
+#        template => 'uploader',
+#    );
 };
 
 websocket '/uploads' => sub {
@@ -1945,6 +1945,11 @@ body  {
 .zoom:hover {
     transform: scale(1.5);
 }
+html {
+
+  scroll-behavior: auto !important;
+
+}
 
 </style>
 </head>
@@ -2029,10 +2034,11 @@ body  {
 
   <div height: 100%;>
     <main class="container-xl bg-secondary shadow-lg mb-1 mt-1 p-3 bg-body rounded" style="--bs-bg-opacity: .90;">
-        <div class="d-flex align-items-center">
-            <div class="spinner-border ms-auto" role="status" aria-hidden="true"><strong>Loading...</strong></div>
-        </div>
         %= content
+          <div class="d-flex align-items-center">
+            <strong class="spinner-hide">Loading...</strong>
+          <div class="spinner-hide spinner-border ms-auto" role="status" aria-hidden="true"></div>
+        </div>
     </main>
   </div>
 
@@ -2063,11 +2069,11 @@ body  {
 <!--  dismiss spinner once page has loaded -->
 <script type="text/javascript">
     $(document).ready(function() {
-        $('.spinner-border').hide();
+        $('.spinner-hide').hide();
     });
 </script>
 
-<!--  remember scroll position 
+<!--  remember scroll position
 <script>
     document.addEventListener("DOMContentLoaded", function (event) {
         var scrollpos = sessionStorage.getItem('scrollpos');
@@ -2096,7 +2102,7 @@ body  {
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
 
-        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
             <h4 class="alert-heading">manage games</h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
@@ -2239,6 +2245,21 @@ body  {
         % }
     % }
   </div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function (event) {
+        var scrollpos = sessionStorage.getItem('scrollpos');
+        if (scrollpos) {
+            window.scrollTo(0, scrollpos);
+            sessionStorage.removeItem('scrollpos');
+        }
+    });
+
+    window.addEventListener("beforeunload", function (e) {
+        sessionStorage.setItem('scrollpos', window.scrollY);
+    });
+</script>
+
 </body>
 </html>
 
@@ -2256,7 +2277,6 @@ body  {
 <body class="m-0 border-0">
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
-
 
       % my %nodes    = %$nodes;
       % my %expected = %$expected;
@@ -2423,19 +2443,42 @@ body  {
         <div class="alert alert-success" role="alert">
           <h4 class="alert-heading"> debug info for <%= $node %></h4>
         </div>
-%   my %results = %$results;
-%  foreach my $title (sort keys %results) {
-        <h3> <%= $title %> </h3> <hr>
+<div class="accordion accordion-flush" id="accordionFlushExample">
+% my %numbers = (1 => 'One', 2 =>'Two', 3 => 'Three', 4 => 'Four', 5 => 'Five', 6 => 'Six', 7 => 'Seven', 8 => 'Eight', 9 => 'Nine');
+% my $count;
+% my %results = %$results;
+% my $show = 'show';
+% foreach my $title (sort keys %results) {
+%   my $info    =  $results{$title};
+%   my @lines   = split(/\n/, $info);
+%   $count++;
+%   $show = undef unless ($count eq 1);
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="flush-heading<%= $numbers{$count} %>">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+        data-bs-target="#flush-collapse<%= $numbers{$count} %>" aria-expanded="false"
+        aria-controls="flush-collapse<%= $numbers{$count} %>">
+        <strong> <%= $title %> </strong> <hr>
+      </button>
+    </h2>
+    <div id="flush-collapse<%= $numbers{$count} %>" class="accordion-collapse collapse <%= $show %>"
+        aria-labelledby="flush-heading<%= $numbers{$count} %>"
+        data-bs-parent="#accordionFlushExample">
+      <div class="accordion-body">
+        <pre>
+          % foreach my $out ( @lines ) {
+          <%= $out %>
+          % }
+        </pre>
+      </div>
+    </div>
+  </div>
 
-%      my $info    =  $results{$title};
-%#         $info    =~ s/ /\&nbsp;/g;
-%      my @lines   = split(/\n/, $info);
-    <pre>
-%    foreach my $out ( @lines ) {
-       <%= $out %>
-    % }
-    </pre>
 % }
+
+
+</div>
+
 </div>
 </body>
 </html>
