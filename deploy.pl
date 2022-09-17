@@ -1923,11 +1923,12 @@ body  {
 
 #command-content{
     text-indent: -26px;
-    padding-left: 26px; font-size: medium; color: #009933;
-    height: 50vh;
+    padding-left: 36px; font-size: small; color: #41FF00;
+    height: 65vh;
     overflow: auto;
     display: flex;
     flex-direction: column-reverse;
+    background-color: black;
 }
 
 .zoom {
@@ -2008,13 +2009,13 @@ body  {
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/status"><h6>status</h6></a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/reload"><h6>reload</h6></a>
-        </li>
-        <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/logfile"><h6>logfile</h6></a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>exit</h6></a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/reload"><h6>reload</h6></a>
+        </li>
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>logout</h6></a>
         </li>
      % }
     </ul>
@@ -2024,7 +2025,7 @@ body  {
 
 
   <div height: 100%;>
-    <main class="container bg-secondary shadow-lg mb-1 mt-1 p-3 bg-body rounded" style="--bs-bg-opacity: .95;">
+    <main class="container-xl bg-secondary shadow-lg mb-1 mt-1 p-3 bg-body rounded" style="--bs-bg-opacity: .90;">
         <div class="d-flex align-items-center">
             <div class="spinner-border ms-auto" role="status" aria-hidden="true"><strong>Loading...</strong></div>
         </div>
@@ -2091,8 +2092,10 @@ body  {
   <body>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="alert alert-success" role="alert">
-          <h4 class="alert-heading">manage games</h4>
+
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <h4 class="alert-heading">manage games</h4>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
 
         % my %nodes     = %$nodes;
@@ -2242,9 +2245,10 @@ body  {
 
 <html>
 
-  <div class="alert alert-success" role="alert">
-    <h4 class="alert-heading">online nodes and games</h4>
-  </div>
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+  <h4 class="alert-heading">online nodes</h4>
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
 
 <body class="m-0 border-0">
   <div class="container-fluid text-left">
@@ -2310,9 +2314,11 @@ body  {
         % }
         <hr>
 
-   <div class="alert alert-danger" role="alert">
-    <h4 class="alert-heading">offline nodes</h4>
-  </div>
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+  <h4 class="alert-heading">offline nodes</h4>
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
 
@@ -2500,26 +2506,21 @@ body  {
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="row d-flex justify-content-between alert alert-success" role="alert">
-          <div class="col-6">
-            <h4 class="alert-heading">logfile: <%= $game %> on <%= $node %></h4>
-          </div>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <h4 class="alert-heading">command console: <%= $game %> on <%= $node %></h4>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-      </div>
+        <div id='command-content' class="text-wrap container-sm text-break">
+            %# This is the command output
+        </div>
+    </div>
 
-   <div id='command-content' class="text-wrap container-sm text-break">
-        %# This is the command output
-   </div>
- </div>
-
-<div class="input-group mb-2 container bg-secondary shadow-lg bg-body rounded">
-  <span class="input-group-text" id="inputGroup-sizing-sm"><small><b><%= $game %>@<%= $node %> :~ </small></b></span>
-  <div class="form-floating">
-    <input type="text" class="form-control" id="cmd" placeholder="cmd">
-    <label for="cmd">command console</label>
-  </div>
-</div>
-
+<!--    <div class="input-group mb-2 container bg-secondary shadow-lg bg-body rounded"> -->
+        <div class="input-group input-group-sm mb-3">
+            <span class="input-group-text" id="inputGroup-sizing-sm"><b><%= $game %>@<%= $node %> :~ </small></b></span>
+            <input type="text" class="form-control" id="cmd" placeholder="cmd"
+              aria-label="Sizing example input" aria-describedby="inputGroup-sizing-sm">
+        </div>
 </body>
 
 <!-- $('html, body').animate({scrollTop: $(document).height()}, 'slow'); -->
