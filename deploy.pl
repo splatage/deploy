@@ -1721,6 +1721,9 @@ sub bootGame {
 
     $ssh->{'link'}->system("$invocation");
 
+    my @cmd = qq(screen -S $game -X colon "logfile flush 2^M");
+    $ssh->{'link'}->system(@cmd);
+
     sleep(10);
 
     if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
