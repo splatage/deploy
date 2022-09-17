@@ -42,7 +42,7 @@ my $config = plugin Config => { default => {
     minion_ssh_master   => 'false',             # Same issue, doesn't play nice with threading
     MOJO_REVERSE_PROXY  => 'true',              # Are we behind a reverse proxy - recomended layout
     secret              => 'supersecretsession',# Leave blank to regenerate a rendom secret each restart
-    poll_interval       => '1',                 # period in seconds to check logs over ssh
+    poll_interval       => '2',                 # period in seconds to check logs over ssh
 
     hypnotoad           => {
 #       listen          => ['https://*:3000?cert=keys/domain.crt&key=keys/domain.key'],
@@ -2581,7 +2581,7 @@ pre {
         </div>
     </div>
   </div>
-  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"></script>
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
       <script type="text/javascript">
         $(document).ready(function () {
             %# Grab our current location
@@ -2624,9 +2624,7 @@ pre {
       </div>
 
    <div id='command-content' class="text-wrap container-sm text-break">
-   <div>
         %# This is the command output
-   </div>
    </div>
  </div>
 
@@ -2638,8 +2636,9 @@ pre {
   </div>
 </div>
 
+</body>
 
-  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"></script>
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script type="text/javascript">
       $(document).ready(function () {
             var ws_host = window.location.href;
@@ -2647,6 +2646,7 @@ pre {
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
             var socket = new WebSocket(ws_host);
+
             socket.onmessage = function (msg) {
                 $('#command-content').append(msg.data);
                 $('html, body').animate({scrollTop: $(document).height()}, 'slow');
@@ -2669,6 +2669,6 @@ pre {
 
       });
     </script>
-</body>
+
 </html>
 
