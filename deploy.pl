@@ -2067,7 +2067,7 @@ body  {
     });
 </script>
 
-<!--  remember scroll position -->
+<!--  remember scroll position 
 <script>
     document.addEventListener("DOMContentLoaded", function (event) {
         var scrollpos = sessionStorage.getItem('scrollpos');
@@ -2081,7 +2081,7 @@ body  {
         sessionStorage.setItem('scrollpos', window.scrollY);
     });
 </script>
-
+-->
 </body>
 </html>
 
@@ -2521,7 +2521,7 @@ body  {
 <!--    <div class="input-group mb-2 container bg-secondary shadow-lg bg-body rounded"> -->
         <div class="input-group input-group-sm mb-3">
             <span class="input-group-text" id="inputGroup-sizing-sm"><b><%= $game %>@<%= $node %> :~ </small></b></span>
-            <input type="text" class="form-control" id="cmd" placeholder="cmd"
+            <input type="text" class="form-control" id="cmd" placeholder="console"
               aria-label="Sizing example input" aria-describedby="inputGroup-sizing-sm">
         </div>
 </body>
