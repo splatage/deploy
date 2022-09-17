@@ -2027,7 +2027,8 @@ html {
           <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>logout</h6></a>
         </li>
      <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="#offcanvasExample"><h6>help</h6></a>
+          <a class="btn-sm btn-outline-warning nav-link" role="button" target="_blank"
+          href="https://github.com/splatage/deploy/wiki"><h6>help</h6></a>
         </li>
      % }
     </ul>
