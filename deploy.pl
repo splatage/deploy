@@ -645,7 +645,9 @@ websocket '/logfile-ws' => sub {
                  );
 
         if ( $results->{'new_content'} ) {
-         $self->send($results->{'new_content'});
+            foreach ( split ( /\n/, $results->{'new_content'} ) ) {
+                $self->send($_);
+            }
         }
     };
 
@@ -2533,33 +2535,40 @@ window.setTimeout(function() {
         </div>
       </div>
 
-    <div id='command-content' class="text-wrap container-lg text-break">
-        %# This is the command output
-    </div>
+        <div id='command-content' class="text-wrap container-sm text-break">
+            %# This is the command output
+        </div>
               <div class="col-2">
             <a class="btn btn-outline-success" href="/clearlogfile" role="button">clear logfile</a>
           </div>
   </div>
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-      <script type="text/javascript">
-        $(document).ready(function () {
-            %# Grab our current location
+    <script type="text/javascript">
+      $(document).ready(function () {
             var ws_host = window.location.href;
-            %# We are requesting websocket data...
-            %# So change the http: part to ws:
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
-            %# I also tacked on the "-ws" at the end
-            %# Connect the remote socket
             var socket = new WebSocket(ws_host);
-            %# When we recieve data from the websocket do the following
-            %# with "msg" as the content.
+
             socket.onmessage = function (msg) {
-                %# Append the new content to the end of our page
                 $('#command-content').prepend(msg.data);
-             }
-        });
+            }
+
+            function send(e) {
+                if (e.keyCode !== 13) {
+                    return false;
+                }
+
+                var cmd = document.getElementById('cmd').value;
+                document.getElementById('cmd').value = '';
+                console.log('send', cmd);
+                socket.send(JSON.stringify({cmd: cmd}));
+            }
+
+      document.getElementById('cmd').addEventListener('keypress', send);
+      document.getElementById('cmd').focus();
+      });
     </script>
 </body>
 </html>
