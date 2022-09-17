@@ -1846,7 +1846,8 @@ sub infoNode {
       $con_cmd .= q+)"'|^[ \t]*$|localhost/ {printf "%s %-5s %-5s %-7s <=> %7s %40s \n"  ,$10,$3,$4,$6,$8,$7}' | sort -n -k4 -n -k3;echo;+;
     my $io_cmd  = 'iostat -h 2>&1';
     my $df_cmd  = 'df -h $(pwd) 2>&1; printf "\n\n"; df -hT --total';
-    my $neo_cmd = 'neofetch --stdout 2>&1';
+#    my $neo_cmd = 'neofetch --stdout 2>&1';
+    my @neo_cmd = q(neofetch|sed 's/\x1B\[[0-9?;]*[a-zCAD0-9]//g');
 #    my $du_cmd  = 'echo $(pwd); du -shc * 2>&1 | sort -h';
 
     foreach my $game ( sort keys %{$game_ports} ) {
@@ -1879,7 +1880,7 @@ collsns    Number of collisions, which should always be zero on a switched LAN.
         $output{'2_inet'}  = $ssh->{'link'}->capture($con_cmd);
         $output{'6_io'}    = $ssh->{'link'}->capture($io_cmd);
         $output{'7_disk'}  = $ssh->{'link'}->capture($df_cmd);
-        $output{'0_neo'}   = $ssh->{'link'}->capture($neo_cmd);
+        $output{'0_neo'}   = $ssh->{'link'}->capture(@neo_cmd);
         $output{'4_proc'}  = $ssh->{'link'}->capture(@pid_cmd);
 #        $output{'8_files'} = $ssh->{'link'}->capture($du_cmd);
 
@@ -2030,8 +2031,6 @@ html {
           <a class="btn-sm btn-outline-warning nav-link" role="button" target="_blank"
           href="https://github.com/splatage/deploy/wiki"><h6>help</h6></a>
         </li>
-     % } else {
-     <h4>restricted entry</h4>     
      % }
     </ul>
     </div>
@@ -2513,16 +2512,12 @@ window.setTimeout(function() {
 % layout 'template';
 
 <html>
-    <body class="m-0 border-0">
-      <div class="container-fluid text-left">
-        <div class="alert alert-success" role="alert">
-          <h4 class="alert-heading"> login to continue...</h4>
-        </div>
-
-%= $c->yancy->auth->login_form
-
-</div>
-</body>
+    <body class="m-0 border-0 mt-5"
+        style="background-size: cover; background-image: url('https://cdn.mos.cms.futurecdn.net/52K7sgnQLSJ8ggfyfvz9yB-970-80.jpg.webp');">
+      <div class="container-fluid text-left bg-opacity-10" style="--bs-bg-opacity: .10;">
+        %= $c->yancy->auth->login_form
+      </div>
+    </body>
 </html>
 
 
@@ -2532,10 +2527,9 @@ window.setTimeout(function() {
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="row d-flex justify-content-between alert alert-success alert-fadeout" role="alert">
-          <div class="col-4">
+        <div class="alert alert-success alert-dismissible fade show alert-fadeout" role="alert">
             <h4 class="alert-heading">server logfile</h4>
-          </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       </div>
 
