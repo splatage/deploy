@@ -749,6 +749,40 @@ get '/log/:node/:game' => sub ($c) {
     );
 };
 
+get '/test' => sub ($c) {
+    my $game = $c->stash('game');
+    app->log->debug("upload window for $game");
+
+    $c->stash(
+        game => $game
+    );
+
+    $c->render(
+        template => 'uploader',
+    );
+};
+
+websocket '/uploads' => sub {
+    my $c = shift;
+     my $game = $c->stash('game');
+
+    app->log->debug("upload websocket for $game open");
+
+    $c->on( json => sub {
+        my ($ws,$file_rh) = @_;
+        my $file = Mojo::Asset::File->new();
+        $file->add_chunk($file_rh->{contents})->move_to($file_rh->{name});
+        app->log->debug("hello $file_rh->{name}");
+        sleep 3;
+        $ws->send({json => {data => $file_rh->{name}}});
+    });
+
+    $c->on(finish => sub {
+        my ($ws,$code,$reason) = @_;
+        app->log->debug("upload webSocket closed with status $code.");
+    });
+
+} => 'save';
 
 any '*' => sub ($c) {
     my $url = $c->req->url->to_abs;
@@ -1854,44 +1888,60 @@ app->start;
 __DATA__
 
 
-@@ layouts/nav.html.ep
+@@ layouts/template.html.ep
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/js/bootstrap.bundle.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT"
+    crossorigin="anonymous">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
-</head>
+<style>
+body  {
+    background-image: url("http://www.splatage.com/wp-content/uploads/2021/06/download-wallpaper-x-minecraft-backgroung-green-full-hd-p-hd-background-1478263362k8n4g.jpg");
+    background-size: cover;
+    background-repeat: repeat-x;
+    background-attachment: fixed;
+}
 
-</div>
-<body class="d-flex flex-column min-vh-100">
-  <style>
-    body  {
-        background-image: url("http://www.splatage.com/wp-content/uploads/2021/06/download-wallpaper-x-minecraft-backgroung-green-full-hd-p-hd-background-1478263362k8n4g.jpg");
-        background-size: cover;
-        background-repeat: repeat-x;
-        background-attachment: fixed;
-    }
-
-    .custom {
+.custom {
     width: 78px !important;
     margin-right: 3px;
-    }
+}
 
-    #top-alert {
-        position: fixed;
-        top: 0;
-        right: 0;
-        z-index: 99999;
-    }
-    .data a, .data span, .data tr, .data td { white-space: pre; }
+#top-alert {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 99999;
+}
 
-    #command-content{  text-indent: -26px;
-                padding-left: 26px; font-size: medium; color: #009933;
-                }
+.data a, .data span, .data tr, .data td { white-space: pre; }
 
-  </style>
+#command-content{
+    text-indent: -26px;
+    padding-left: 26px; font-size: medium; color: #009933;
+}
+
+.zoom {
+    padding: 1px;
+    transition: transform .2s; /* Animation */
+    width: 30px;
+    height: 30px;
+    margin: 0 auto;
+}
+
+.zoom:hover {
+    transform: scale(1.5);
+}
+
+</style>
+</head>
+
+<body class="d-flex flex-column min-vh-100">
+
 
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
   <symbol id="check-circle-fill" fill="currentColor" viewBox="0 0 16 16">
@@ -2021,13 +2071,24 @@ __DATA__
   <!-- Copyright -->
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"
+    integrity="sha384-oBqDVmMz9ATKxIep9tiCxS/Z9fNfEXiDAYTujMAeBAsjFuCZSmKbSSUnQlmh/jp3"
+    crossorigin="anonymous">
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/js/bootstrap.min.js"
+    integrity="sha384-7VPbUDkoPSGFnVtYi0QogXtr74QeVeeIs99Qfg5YCF+TidwNdjvaKZX19NZ/e6oz"
+    crossorigin="anonymous">
+</script>
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js">
+</script>
+
 </body>
 </html>
 
 
 
 @@ node.html.ep
-% layout 'nav';
+% layout 'template';
 
 <!DOCTYPE html>
 <html>
@@ -2038,9 +2099,9 @@ __DATA__
           <h4 class="alert-heading">manage games</h4>
         </div>
 
-        % my %nodes   = %$nodes;
-        % my %history = %$history;
-        % my %expected = %$expected;
+        % my %nodes     = %$nodes;
+        % my %history   = %$history;
+        % my %expected  = %$expected;
 
         % for my $node (sort keys %$nodes) {
           % if ( ! $nodes{$node}{'offline'} ) {
@@ -2067,9 +2128,9 @@ __DATA__
             % for my $game (sort keys %{$nodes{$node}}) {
             <div class="row height: 40px">
 
-                % my $online       = 'true'; # = $node{$game}{'online'};
-                % my $isLobby     = 'false'; # = $node{$game}{'isLobby'};
-                % my $isRestricted = 'false'; # = $node{$game}{'isRestricted'};
+                % my $online        = 'true';   # = $node{$game}{'online'};
+                % my $isLobby       = 'false';  # = $node{$game}{'isLobby'};
+                % my $isRestricted  = 'false';  # = $node{$game}{'isRestricted'};
 
                 <div class="col d-flex justify-content-start mb-2 shadow">
 
@@ -2086,7 +2147,7 @@ __DATA__
                           alt="Generic placeholder image" height="35">
                         </image>
                       </a>
-                        <img class="align-self-top mr-3"
+                        <img class="zoom align-self-top mr-3"
                           src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
                           alt="Generic placeholder image" height="25">
                           </h4> <%= $game %> </h4>
@@ -2112,7 +2173,7 @@ __DATA__
                 % } else {
                     <div class="col d-flex justify-content-end mb-2 shadow">
                         <a class="ml-1 btn btn-sm btn-outline-danger
-                        justify-end" href="/minion/locks"      role="button">locked while task is running</a>
+                        justify-end" href="/minion/locks"      role="button">task is running</a>
                     </div>
                 % }
             </div>
@@ -2142,7 +2203,7 @@ __DATA__
                           alt="Generic placeholder image" height="35">
                         </image>
                       </a>
-                      <img class="align-self-top mr-3"
+                      <img class="zoom align-self-top mr-3"
                         src="http://www.splatage.com/wp-content/uploads/2022/08/minecraft-chest-icon-19.png"
                         alt="Generic placeholder image" height="30">
                         </h4> <%= $game %> </h4>
@@ -2153,14 +2214,6 @@ __DATA__
 
                     % if (app->minion->lock($game, 0)) {
                         <div class="col d-flex justify-content-end mb-2 shadow">
-                        <!--
-                            <a class="ml-1 btn btn-sm btn-outline-dark    custom
-                                justify-end" data-toggle="tooltip" data-placement="top" title="migrate to another node"
-                                href="/move/<%= $game %>/<%= $node %>"    role="button">move</a>
-                            <a class="ml-1 btn btn-sm btn-outline-dark     custom
-                                justify-end" data-toggle="tooltip" data-placement="top" title="update server and plugins"
-                                href="/update/<%= $game %>/<%= $node %>"    role="button">update</a>
-                           -->
                             <a class="ml-1 btn btn-sm btn-outline-secondary  custom
                                 justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
                                 href="/deploy/<%= $game %>/<%= $node %>"    role="button">deploy</a>
@@ -2175,22 +2228,15 @@ __DATA__
                     <div class="col d-flex justify-content-end mb-2 shadow">
                         <a class="ml-1 btn btn-sm btn-outline-danger
                         justify-end" data-toggle="tooltip" data-placement="top" title="for safety on a single job can run on each game"
-                        href="/minion/locks"      role="button">locked while task is running</a>
+                        href="/minion/locks"      role="button">task is running</a>
                      </div>
                     % }
-
                 </div>
                 % }
             %}
         % }
     % }
-
   </div>
-</body>
-</html>
-
-
-<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 
 <script>
     document.addEventListener("DOMContentLoaded", function (event) {
@@ -2205,34 +2251,14 @@ __DATA__
         sessionStorage.setItem('scrollpos', window.scrollY);
     });
 </script>
-<style>
-.zoom {
-  padding: 1px;
-  transition: transform .2s; /* Animation */
-  width: 30px;
-  height: 30px;
-  margin: 0 auto;
-}
 
-.zoom:hover {
-  transform: scale(2.5); /* (150% zoom - Note: if the zoom is too large, it will go outside of the viewport) */
-}
-</style>
-
-%= javascript begin
-    // Automatically submit the form when an input changes
-    $( 'form input' ).change( function ( e ) {
-        $(this).parents("form").submit();
-    } );
-% end
-
-
+</body>
+</html>
 
 
 @@ index.html.ep
-% layout 'nav';
+% layout 'template';
 
-<!DOCTYPE html>
 <html>
 
   <div class="alert alert-success" role="alert">
@@ -2309,9 +2335,8 @@ __DATA__
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
 
-
-      %  %nodes    = %$nodes;
-      %  %expected = %$expected;
+      % %nodes    = %$nodes;
+      % %expected = %$expected;
       % for my $node (sort keys %$nodes) {
       % if ( $nodes{$node}{'offline'} ) {
         <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">
@@ -2322,7 +2347,8 @@ __DATA__
               alt="Generic placeholder image" height="80">
                 <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
 
-                  <%= $node %>
+                <%= $node %>
+
                 </a>
              </img>
                 <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
@@ -2349,12 +2375,12 @@ __DATA__
                    % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) {
 
                      <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
-                           <span class="badge badge-primary text-dark">
-                       <%= $game %></span>
-                        <span style="float:right; mr-1" class="mr-1">
-                        <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
-                        </span>
-
+                       <span class="badge badge-primary text-dark">
+                         <%= $game %>
+                       </span>
+                       <span style="float:right; mr-1" class="mr-1">
+                         <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
+                       </span>
                      </a>
                    % }
                 % }
@@ -2370,149 +2396,35 @@ __DATA__
 </html>
 
 
-
-
-@@ log.html.ep
-% layout 'nav';
-
-<!DOCTYPE html>
-<html>
-  <head>
-    %# This tells phone browsers not to scale out
-   %# when first loaded
-
-    <meta name="viewport" content="initial-scale=1.0"/>
-    <title>splatage.com term</title>
-
-  </head>
-   <meta name="viewport" content="initial-scale=1.0"/>
-<body class="m-0 border-0">
-  <style type="text/css">
-
-  body {
-  word-wrap: break-word;
-  color: #00ff00;
-  background-image: radial-gradient(
-    rgba(0, 150, 0, 0.75), black 120%
-  );
-
-  margin: 0;
-
-  padding: 2rem;
-  color: lime;
-  font: 1rem Inconsolata, monospace;
-  text-shadow: 0 0 5px #C8C8C8;
-  &::after {
-    content: "";
-
-    top: 0;
-    left: 0;
-
-    background: repeating-linear-gradient(
-      0deg,
-      rgba(black, 0.15),
-      rgba(black, 0.15) 1px,
-      transparent 1px,
-      transparent 2px
-    );
-    pointer-events: none;
-  }
-}
-::selection {
-  background: #0080FF;
-  text-shadow: none;
-}
-pre {
-  margin: 0;
-}
-
-#header {
-  display: flex;
-  align-items: baseline;
-  margin: 0;
-  font: 1rem Inconsolata, monospace;
-  text-shadow: 0 0 5px #C8C8C8;
-}
-
-
- /* blinking cursor */
-#cursor {
-  background: lime;
-  line-height: 15px;
-  margin-left: 3px;
-  -webkit-animation: blink 0.8s infinite;
-  width: 7px;
-  height: 15px;
-}
-
-@-webkit-keyframes blink {
-  0% {background: #222}
-  50% {background: lime}
-  100% {background: #222}
-}
-</style>
-
-<%== $log_data %>
-
-<div id="header"><p>minecraft@<%= $node %>:~$ tail -f <%= $game %>.log &</p></div>
-<div id="header"><p>minecraft@<%= $node %>:~$ </p><div id="cursor">  </div>
-
-</div>
-
-</body>
-</html>
-
-<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-
-<script>
-    document.addEventListener("DOMContentLoaded", function (event) {
-        var scrollpos = sessionStorage.getItem('scrollpos');
-        if (scrollpos) {
-            window.scrollTo(0, scrollpos);
-            sessionStorage.removeItem('scrollpos');
-        }
-    });
-
-    window.addEventListener("beforeunload", function (e) {
-        sessionStorage.setItem('scrollpos', window.scrollY);
-    });
-</script>
-
-
-
-
 @@ files.html.ep
-% layout 'nav';
+% layout 'template';
 
 <!DOCTYPE html>
 
 <html>
-  <body>
-    <body class="m-0 border-0">
+   <body class="m-0 border-0">
       <div class="container-fluid text-left">
         <div class="alert alert-success" role="alert">
           <h4 class="alert-heading">game</h4>
         </div>
-      % my @files = @$files;
 
-<h2> Files </h2>
-<%= @files %> and directories
+        % my @files = @$files;
 
-% foreach my $line (@files) {
-<div> <%= $line %> </div>
-%    }
-<hr>
+        <h2> Files </h2>
+        <%= @files %> and directories
 
-
-    </div>
-</body>
+        % foreach my $line (@files) {
+          <div> <%= $line %> </div>
+        % }
+        <hr>
+      </div>
+   </body>
 </html>
 
 
 
-
 @@ node_details.html.ep
-% layout 'nav';
+% layout 'template';
 
 <!DOCTYPE html>
 <html>
@@ -2540,7 +2452,7 @@ pre {
 
 
 @@ login.html.ep
-% layout 'nav';
+% layout 'template';
 
 <!DOCTYPE html>
 <html>
@@ -2558,7 +2470,7 @@ pre {
 
 
 @@ logfile.html.ep
-% layout 'nav';
+% layout 'template';
 
 <!DOCTYPE html>
 
@@ -2609,7 +2521,7 @@ pre {
 
 
 @@ gamelog.html.ep
-% layout 'nav';
+% layout 'template';
 
 <!DOCTYPE html>
 
@@ -2671,4 +2583,113 @@ pre {
     </script>
 
 </html>
+
+
+@@ uploader.html.ep
+% layout 'template';
+
+%= stylesheet begin
+
+    table#holder {
+        border: 5px dashed #CCC;
+        width:400px;
+        font-family:Verdana;
+    }
+    table#holder tr:first-child {
+        height:50px;
+        text-align:center;
+    }
+    table#holder tr:last-child {
+        height:300px;
+        line-height: 50px;
+    }
+    table#holder li img {
+        height: 30px;
+    }
+
+% end
+
+%= javascript begin
+
+function transViaWS (url,files) {
+
+      console.log("inside the websocket block: ", url);
+
+      var ws     = new WebSocket(url);
+      var reader = new FileReader();
+      reader.fileName =  files.item(0).name;
+
+      var i = 0;
+
+      reader.onloadend = function(event) {
+          var contents = event.target.result;
+          var name     = event.target.fileName;
+          $('#fileList').text('Tranforming ' + name)
+          ws.send(
+                JSON.stringify( {'contents':contents, 'name': name} )
+          );
+          console.log(event.target.fileName);
+          i++;
+      };
+
+      reader.onprogress = function(data) {
+        if (data.lengthComputable){
+            var progress = parseInt( ((data.loaded / data.total) * 100), 10 );
+            console.log(progress);
+        }
+      }
+
+      ws.onopen = function () {
+          reader.readAsText( files.item(0) );
+      };
+
+      ws.onmessage = function (evt) {
+          var data = JSON.parse(evt.data);
+          console.log(i);
+          console.log(data);
+          if (i < files.length){
+            reader.fileName = files.item(i).name;
+            reader.readAsText( files.item(i) );
+          }
+          else {
+            ws.close();
+          }
+      };
+}
+
+
+% end
+
+%= javascript begin
+
+$(document).ready ( function () {
+    $('#holder').on({
+        'dragover dragenter': function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        },
+        'drop': function(e) {
+            // console.log(e.originalEvent, instanceof, DragEvent);
+            var dataTransfer = e.originalEvent.dataTransfer;
+            if (dataTransfer && dataTransfer.files.length) {
+                e.preventDefault();
+                e.stopPropagation();
+                files  = dataTransfer.files;
+                transViaWS("<%= url_for('save')->to_abs %>", files);
+            }
+        }
+    });
+});
+
+% end
+
+<table id="holder">
+  <tr>
+    <td>Drop files here</td>
+  </tr>
+  <tr>
+    <td><ul id="fileList"></ul></td>
+  </tr>
+</table>
+
 
