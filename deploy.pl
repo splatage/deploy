@@ -684,7 +684,7 @@ websocket '/log/:node/<game>-ws' => sub {
 
     $self->inactivity_timeout(600);
 
-    app->log->info("openeing websocket for $user to read $game logfile on $node");
+    app->log->info("opening websocket for $user to read $game logfile on $node");
 
 
     my $send_data;
@@ -1920,6 +1920,7 @@ body  {
     top: 0;
     right: 0;
     z-index: 99999;
+    width: 40%;
 }
 
 .data a, .data span, .data tr, .data td { white-space: pre; }
@@ -1970,7 +1971,7 @@ html {
 
     % my $flash_message = $c->flash('message');
     % if ($flash_message) {
-    <div id="top-alert" class="alert alert-primary alert-dismissible fade show" role="alert">
+    <div id="top-alert" class="alert alert-primary d-flex align-items-center alert-dismissible fade show alert-fadeout" role="alert">
         <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         <%= $flash_message %>
@@ -1980,7 +1981,7 @@ html {
 
     % my $flash_error = $c->flash('error');
     % if ($flash_error) {
-    <div id="top-alert" class="alert alert-danger alert-dismissible fade show" role="alert">
+    <div id="top-alert" class="alert alert-danger d-flex align-items-center alert-dismissible fade show alert-fadeout" role="alert">
         <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         <%= $flash_error %>
@@ -2025,12 +2026,14 @@ html {
         <li class="nav-item">
           <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>logout</h6></a>
         </li>
+     <li class="nav-item">
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="#offcanvasExample"><h6>help</h6></a>
+        </li>
      % }
     </ul>
     </div>
   </div>
 </nav>
-
 
   <div height: 100%;>
     <main class="container-xl bg-secondary shadow-lg mb-1 mt-1 p-3 bg-body rounded" style="--bs-bg-opacity: .90;">
@@ -2073,6 +2076,25 @@ html {
     });
 </script>
 
+<!--  fade out alerts
+<script>
+    setTimeout(function() {
+        bootstrap.Alert.getOrCreateInstance(document.querySelector(".alert")).close();
+    }, 5000)
+</script>
+-->
+
+<!--  fade out alerts -->
+<script>
+$(document).ready(function () {
+
+window.setTimeout(function() {
+    $(".alert-fadeout").fadeTo(1000, 0).slideUp(1000, function(){
+        $(this).remove();
+    });
+}, 5000);
+});
+</script>
 <!--  remember scroll position
 <script>
     document.addEventListener("DOMContentLoaded", function (event) {
@@ -2096,7 +2118,7 @@ html {
 @@ node.html.ep
 % layout 'template';
 
-<!DOCTYPE html>
+<meta http-equiv="refresh" content="10">
 <html>
   <body>
     <body class="m-0 border-0">
@@ -2507,12 +2529,9 @@ html {
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="row d-flex justify-content-between alert alert-success" role="alert">
+        <div class="row d-flex justify-content-between alert alert-success alert-fadeout" role="alert">
           <div class="col-4">
             <h4 class="alert-heading">server logfile</h4>
-          </div>
-          <div class="col-2">
-            <a class="btn btn-outline-success" href="/clearlogfile" role="button">clear logfile</a>
           </div>
         </div>
       </div>
@@ -2520,6 +2539,9 @@ html {
     <div id='command-content' class="text-wrap container-lg text-break">
         %# This is the command output
     </div>
+              <div class="col-2">
+            <a class="btn btn-outline-success" href="/clearlogfile" role="button">clear logfile</a>
+          </div>
   </div>
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
       <script type="text/javascript">
@@ -2552,7 +2574,7 @@ html {
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <div class="alert alert-success alert-dismissible fade show alert-fadeout" role="alert">
             <h4 class="alert-heading">command console: <%= $game %> on <%= $node %></h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
