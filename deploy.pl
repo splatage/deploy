@@ -1893,9 +1893,10 @@ __DATA__
 <html>
 <head>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-    integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT"
-    crossorigin="anonymous">
+        rel="stylesheet"
+        integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT"
+        crossorigin="anonymous">
+
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
@@ -1923,6 +1924,10 @@ body  {
 #command-content{
     text-indent: -26px;
     padding-left: 26px; font-size: medium; color: #009933;
+    height: 50vh;
+    overflow: auto;
+    display: flex;
+    flex-direction: column-reverse;
 }
 
 .zoom {
@@ -1941,7 +1946,6 @@ body  {
 </head>
 
 <body class="d-flex flex-column min-vh-100">
-
 
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
   <symbol id="check-circle-fill" fill="currentColor" viewBox="0 0 16 16">
@@ -2021,6 +2025,9 @@ body  {
 
   <div height: 100%;>
     <main class="container bg-secondary shadow-lg mb-1 mt-1 p-3 bg-body rounded" style="--bs-bg-opacity: .95;">
+        <div class="d-flex align-items-center">
+            <div class="spinner-border ms-auto" role="status" aria-hidden="true"><strong>Loading...</strong></div>
+        </div>
         %= content
     </main>
   </div>
@@ -2028,41 +2035,6 @@ body  {
 
 <footer class="bg-dark text-center text-white mt-auto">
   <!-- Grid container -->
-  <div class="container p-4 pb-0">
-    <!-- Section: Social media -->
-    <section class="mb-4">
-      <!-- Facebook -->
-      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
-        ><i class="fab fa-facebook-f"></i
-      ></a>
-
-      <!-- Twitter -->
-      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
-        ><i class="fab fa-twitter"></i
-      ></a>
-
-      <!-- Google -->
-      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
-        ><i class="fab fa-google"></i
-      ></a>
-
-      <!-- Instagram -->
-      <a class="btn btn-outline-light btn-floating m-1" href="#!" role="button"
-        ><i class="fab fa-instagram"></i
-      ></a>
-      <!-- Github -->
-      <a class="btn btn-outline-light btn-floating m-1" href="https://github.com/mojolicious/mojo-status" role="button"
-        ><i class="fab fa-github"></i
-      ></a>
-      <!-- Github -->
-      <a class="btn btn-outline-light btn-floating m-1" href="https://github.com/splatage/deploy" role="button"
-        ><i class="fab fa-github"></i
-      ></a>
-    </section>
-    <!-- Section: Social media -->
-  </div>
-  <!-- Grid container -->
-
   <!-- Copyright -->
   <div class="text-center p-3" style="background-color: rgba(0, 0, 0, 0.2);">
     © 2022 Copyright:
@@ -2070,6 +2042,10 @@ body  {
   </div>
   <!-- Copyright -->
 </footer>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.1/jquery.min.js"></script>
+<link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/themes/smoothness/jquery-ui.css">
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"
     integrity="sha384-oBqDVmMz9ATKxIep9tiCxS/Z9fNfEXiDAYTujMAeBAsjFuCZSmKbSSUnQlmh/jp3"
@@ -2079,7 +2055,27 @@ body  {
     integrity="sha384-7VPbUDkoPSGFnVtYi0QogXtr74QeVeeIs99Qfg5YCF+TidwNdjvaKZX19NZ/e6oz"
     crossorigin="anonymous">
 </script>
-<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js">
+
+<!--  dismiss spinner once page has loaded -->
+<script type="text/javascript">
+    $(document).ready(function() {
+        $('.spinner-border').hide();
+    });
+</script>
+
+<!--  remember scroll position -->
+<script>
+    document.addEventListener("DOMContentLoaded", function (event) {
+        var scrollpos = sessionStorage.getItem('scrollpos');
+        if (scrollpos) {
+            window.scrollTo(0, scrollpos);
+            sessionStorage.removeItem('scrollpos');
+        }
+    });
+
+    window.addEventListener("beforeunload", function (e) {
+        sessionStorage.setItem('scrollpos', window.scrollY);
+    });
 </script>
 
 </body>
@@ -2237,21 +2233,6 @@ body  {
         % }
     % }
   </div>
-
-<script>
-    document.addEventListener("DOMContentLoaded", function (event) {
-        var scrollpos = sessionStorage.getItem('scrollpos');
-        if (scrollpos) {
-            window.scrollTo(0, scrollpos);
-            sessionStorage.removeItem('scrollpos');
-        }
-    });
-
-    window.addEventListener("beforeunload", function (e) {
-        sessionStorage.setItem('scrollpos', window.scrollY);
-    });
-</script>
-
 </body>
 </html>
 
@@ -2454,7 +2435,6 @@ body  {
 @@ login.html.ep
 % layout 'template';
 
-<!DOCTYPE html>
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
@@ -2472,8 +2452,6 @@ body  {
 @@ logfile.html.ep
 % layout 'template';
 
-<!DOCTYPE html>
-
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
@@ -2487,10 +2465,8 @@ body  {
         </div>
       </div>
 
-   <div id='command-content' class="text-wrap container-lg text-break">
-   <div>
+    <div id='command-content' class="text-wrap container-lg text-break">
         %# This is the command output
-        </div>
     </div>
   </div>
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
@@ -2510,10 +2486,8 @@ body  {
             %# with "msg" as the content.
             socket.onmessage = function (msg) {
                 %# Append the new content to the end of our page
-                $('#command-content').append(msg.data);
-                $('html, body').animate({scrollTop: $(document).height()}, 'slow');
+                $('#command-content').prepend(msg.data);
              }
-             $('html, body').animate({scrollTop: $(document).height()}, 'slow');
         });
     </script>
 </body>
@@ -2522,8 +2496,6 @@ body  {
 
 @@ gamelog.html.ep
 % layout 'template';
-
-<!DOCTYPE html>
 
 <html>
     <body class="m-0 border-0">
@@ -2550,7 +2522,8 @@ body  {
 
 </body>
 
-  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<!-- $('html, body').animate({scrollTop: $(document).height()}, 'slow'); -->
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script type="text/javascript">
       $(document).ready(function () {
             var ws_host = window.location.href;
@@ -2560,28 +2533,24 @@ body  {
             var socket = new WebSocket(ws_host);
 
             socket.onmessage = function (msg) {
-                $('#command-content').append(msg.data);
-                $('html, body').animate({scrollTop: $(document).height()}, 'slow');
-             }
-            $('html, body').animate({scrollTop: $(document).height()}, 'slow');
+                $('#command-content').prepend(msg.data);
+            }
 
-      function send(e) {
-        if (e.keyCode !== 13) {
-           return false;
-        }
-        var cmd = document.getElementById('cmd').value;
-        document.getElementById('cmd').value = '';
-        console.log('send', cmd);
-        socket.send(JSON.stringify({cmd: cmd}));
-      }
+            function send(e) {
+                if (e.keyCode !== 13) {
+                    return false;
+                }
+
+                var cmd = document.getElementById('cmd').value;
+                document.getElementById('cmd').value = '';
+                console.log('send', cmd);
+                socket.send(JSON.stringify({cmd: cmd}));
+            }
 
       document.getElementById('cmd').addEventListener('keypress', send);
       document.getElementById('cmd').focus();
-
-
       });
     </script>
-
 </html>
 
 
