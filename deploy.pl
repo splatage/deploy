@@ -2030,6 +2030,8 @@ html {
           <a class="btn-sm btn-outline-warning nav-link" role="button" target="_blank"
           href="https://github.com/splatage/deploy/wiki"><h6>help</h6></a>
         </li>
+     % } else {
+     <h4>restricted entry</h4>     
      % }
     </ul>
     </div>
@@ -2514,7 +2516,7 @@ window.setTimeout(function() {
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
         <div class="alert alert-success" role="alert">
-          <h4 class="alert-heading"> login...</h4>
+          <h4 class="alert-heading"> login to continue...</h4>
         </div>
 
 %= $c->yancy->auth->login_form
