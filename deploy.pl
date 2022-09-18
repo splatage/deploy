@@ -262,7 +262,7 @@ get '/boot/:game/:node' => sub ($c) {
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
 
     $c->flash( message => "sending minions to $task $game on $node " );
-    #$c->redirect_to("/node/$node");
+
     $c->redirect_to($c->req->headers->referrer);
 };
 app->minion->add_task(
@@ -305,8 +305,8 @@ get '/halt/:game/:node' => sub ($c) {
 
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
-    #$c->redirect_to("/node/$node");
-     $c->redirect_to($c->req->headers->referrer)
+
+    $c->redirect_to($c->req->headers->referrer)
 };
 app->minion->add_task(
     halt => sub ( $job, $game ) {
@@ -339,7 +339,7 @@ get '/deploy/:game/:node' => sub ($c) {
 
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
     $c->flash( message => "sending minions to $task $game on $node " );
-    #$c->redirect_to("/node/$node");
+
     $c->redirect_to($c->req->headers->referrer)
 };
 app->minion->add_task(
@@ -371,7 +371,7 @@ get '/store/:game/:node' => sub ($c) {
 
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120  } );
     $c->flash( message => "sending minions to $task $game on $node " );
-    #$c->redirect_to("/node/$node");
+
     $c->redirect_to($c->req->headers->referrer)
 };
 app->minion->add_task(
@@ -404,7 +404,7 @@ get '/link/:game/:node' => sub ($c) {
 
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120  } );
     $c->flash( message => "sending minions to $task $game on $node " );
-    #$c->redirect_to("/node/$node");
+
     $c->redirect_to($c->req->headers->referrer)
 };
 app->minion->add_task(
@@ -435,7 +435,7 @@ get '/drop/:game/:node' => sub ($c) {
 
     $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120  } );
     $c->flash( message => "sending minions to $task $game on $node " );
-    #$c->redirect_to("/node/$node");
+
     $c->redirect_to($c->req->headers->referrer)
 };
 app->minion->add_task(
@@ -615,7 +615,7 @@ get '/reload' => sub ($c) {
     kill 'USR2' => $ppid;
     sleep(1);
     $c->flash(message => "reload signal sent to $ppid");
-    $c->redirect_to("/");
+    $c->redirect_to($c->req->headers->referrer);
 };
 
 
@@ -1677,21 +1677,19 @@ sub storeGame {
 
     unless ( $settings->{$game}{'isBungee'} ) {
         sendCommand(
-            command     => "say Backup complete^Msave-on",
-            game        => $game,
-            node        => $settings->{$game}{'node'},
-            ip          => $ip,
-            ssh_master  => $args{'ssh_master'}
-        );
-
-        sendCommand(
             command     => "co purge t:30d",
             game        => $game,
             node        => $settings->{$game}{'node'},
             ip          => $ip,
             ssh_master  => $args{'ssh_master'}
         );
-        sleep(0.5);
+        sendCommand(
+            command     => "say Backup complete^Msave-on",
+            game        => $game,
+            node        => $settings->{$game}{'node'},
+            ip          => $ip,
+            ssh_master  => $args{'ssh_master'}
+        );
     };
 
     return $output;
@@ -2634,27 +2632,34 @@ window.setTimeout(function() {
             <div class="offcanvas-body">
 
              % if (app->minion->lock($game, 0)) {
-                <h6 class="mt-3">online controls</h6>
+
+                <h6 class="mt-3">storage</h6>
                 <hr>
                 <div class="list-group">
                     <a href="/store/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-secondary">store</a>
-                    <a href="/link/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">link</a>
-                    <a href="/drop/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">drop</a>
-                    <a href="/halt/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-dark">halt</a>
-                    <h6 class="mt-3">offline controls</h6>
-                <hr>
-
                     <a href="/deploy/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-secondary">deploy</a>
+                </div>
+
+                <h6 class="mt-3">network</h6>
+                <hr>
+                <div class="list-group">
                     <a href="/drop/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-secondary">drop</a>
+                    <a href="/deploy/<%= $game %>/<%= $node %>"
+                        class="list-group-item list-group-item-action list-group-item-secondary">link</a>
+                </div>
+
+                <h6 class="mt-3">power</h6>
+                <hr>
+                <div class="list-group">
+                    <a href="/halt/<%= $game %>/<%= $node %>"
+                        class="list-group-item list-group-item-action list-group-item-dark">halt</a>
                     <a href="/boot/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-dark">boot</a>
-                    </div>
+                </div>
+
                 % } else {
                     <div class="col d-flex justify-content-end mb-2 shadow">
                         <a class="ml-1 btn btn-sm btn-outline-danger
