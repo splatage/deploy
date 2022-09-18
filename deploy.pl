@@ -180,8 +180,7 @@ group {
         if ( $name ne '' ) {
             return 1;
         }
-        $c->res->headers->www_authenticate('Basic');
-#        return undef;
+        $c->res->headers->www_authenticate('Basic');;
         $c->flash( error => "you need to login to do that" );
         $c->redirect_to("/login");
     };
@@ -195,7 +194,6 @@ group {
             return 1;
         }
         $c->res->headers->www_authenticate('Basic');
-#        return undef;
         $c->flash( error => "you need to login to do that" );
         $c->redirect_to("/login");
 
@@ -802,6 +800,11 @@ any '*' => sub ($c) {
     $c->redirect_to("/");
 };
 
+websocket '/notify' => sub ($c) {
+
+
+
+};
 
 ###########################################################
 ##    Functions
@@ -1149,14 +1152,17 @@ sub checkIsOnline {
 
     foreach my $this_node (@nodes_to_check) {
 
-        $return_hash{$this_node} = {};
+        $return_hash{$this_node}{'offline'}{'offline'} = 'offline';
         app->log->debug("Query $this_node for games...");
 
         my $ip = $enabledNodes->{$this_node}{'ip'};
 
         my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
-        next if $ssh->{'error'} ;
-        next if $ssh->{'debug'} ;
+        next if     $ssh->{'error'} ;
+        next if     $ssh->{'debug'} ;
+        next unless $ssh->{'link'};
+
+        delete $return_hash{$this_node}{'offline'};
 
         my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
         my $screen_list = $ssh->{'link'}->capture("@cmd");
@@ -1488,7 +1494,14 @@ sub connectSSH {
     $args{'ip'}   || return "Aborting SSH: must specify ip";
 
     $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
-    $args{'link'}       = $ssh_master{ $PID.$args{'user'}.$args{'ip'} };
+
+    ## Check for fork context shift
+    if ( $ssh_master{ $PID.$args{'user'}.$args{'ip'} } ) {
+        $args{'link'} = $ssh_master{ $PID.$args{'user'}.$args{'ip'} };
+    }
+    else {
+        delete $args{'link'};
+    }
 
     if ( $args{'ssh_master'} eq 'true' && defined( $args{'link'} ) ) {
         app->log->debug("Master socket exists $PID.$args{'user'}.$args{'ip'}");
@@ -1499,7 +1512,7 @@ sub connectSSH {
         }
         else {
             $args{'link'}->disconnect();
-            $args{'link'} = {};
+            delete $args{'link'};
         }
     }
 
@@ -1510,7 +1523,7 @@ sub connectSSH {
         $args{'link'}   = Net::OpenSSH->new( $args{'connection'},
             batch_mode  => 1,
             timeout     => 60,
-            async       => 1,
+            async       => 0,
             ctl_path    => $socket,
             master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=1' ]
         );
@@ -1525,7 +1538,7 @@ sub connectSSH {
         $args{'link'}   = Net::OpenSSH->new( $args{'connection'},
             batch_mode  => 1,
             timeout     => 60,
-            async       => 1,
+            async       => 0,
             master_opts => [ '-o StrictHostKeyChecking=no', '-o ConnectTimeout=1' ]
         );
     }
@@ -1533,10 +1546,10 @@ sub connectSSH {
     if ( $args{'link'}->error ) {
         $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
         app->log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
-        $args{'link'} = undef;
+        delete $args{'link'};
     }
     else {
-        app->log->debug("SSH established " . $args{'connection'});
+        app->log->debug("SSH established " . $args{'connection'} . ": " . $args{'link'}->error);
         return \%args;
     }
 }
@@ -2314,7 +2327,7 @@ window.setTimeout(function() {
       % my %nodes    = %$nodes;
       % my %expected = %$expected;
       % for my $node (sort keys %$nodes) {
-      % if ( ! $nodes{$node}{'offline'} ) {
+      % if ( ! $nodes{$node}{'offline'}{'offline'} ) {
 
         <div class="col-12 col-md-3 shadow bg-medium mt-4 mb-2 rounded">
 
@@ -2381,14 +2394,14 @@ window.setTimeout(function() {
       % %nodes    = %$nodes;
       % %expected = %$expected;
       % for my $node (sort keys %$nodes) {
-      % if ( $nodes{$node}{'offline'} ) {
+      % if ( $nodes{$node}{'offline'}{'offline'} ) {
         <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">
 
           <div class="media mt-2">
             <img class="align-self-top mr-1 mt-2 mb-2"
               src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
               alt="Generic placeholder image" height="80">
-                <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
+                <a href="#" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
 
                 <%= $node %>
 
@@ -2621,7 +2634,7 @@ window.setTimeout(function() {
                     <a href="/drop/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-secondary">drop</a>
                     <a href="/halt/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">halt</a>
+                        class="list-group-item list-group-item-action list-group-item-dark">halt</a>
                     <h6 class="mt-3">offline controls</h6>
                 <hr>
 
@@ -2630,7 +2643,7 @@ window.setTimeout(function() {
                     <a href="/drop/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-secondary">drop</a>
                     <a href="/boot/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">boot</a>
+                        class="list-group-item list-group-item-action list-group-item-dark">boot</a>
                     </div>
                 % } else {
                     <div class="col d-flex justify-content-end mb-2 shadow">
@@ -2786,5 +2799,3 @@ $(document).ready ( function () {
     <td><ul id="fileList"></ul></td>
   </tr>
 </table>
-
-
