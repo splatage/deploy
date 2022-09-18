@@ -485,12 +485,11 @@ get '/' => sub ($c) {
 
 get '/info/:node/' => sub ($c) {
 
-    my $node = $c->stash('node');
-
+    my $node    = $c->stash('node');
     my $results = infoNode( node => $node, ssh_master => $config->{'ssh_master'} );
 
-    $c->stash( results => $results );
-    $c->render( template => 'node_details', results => $results );
+    $c->stash( results   => $results );
+    $c->render( template => 'node_details' );
 };
 
 get '/node/:node' => sub ($c) {
@@ -502,6 +501,11 @@ get '/node/:node' => sub ($c) {
         game        => '',
         ssh_master  => $config->{'ssh_master'}
     );
+
+    if ( $results->{$node}{'offline'} ) {
+        $c->flash(error => "$node doesn't exist");
+        $c->redirect_to("/");
+    };
 
     my $ip = readFromDB(
         table       => 'nodes',
@@ -610,7 +614,7 @@ get '/reload' => sub ($c) {
     my $ip = $c->remote_addr;
     kill 'USR2' => $ppid;
     sleep(1);
-    $c->flash(message => "hot reload signal sent to $ppid");
+    $c->flash(message => "reload signal sent to $ppid");
     $c->redirect_to("/");
 };
 
@@ -1158,9 +1162,10 @@ sub checkIsOnline {
         my $ip = $enabledNodes->{$this_node}{'ip'};
 
         my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
-        next if     $ssh->{'error'} ;
-        next if     $ssh->{'debug'} ;
-        next unless $ssh->{'link'};
+        if ( not $ssh->{'link'} or $ssh->{'error'}) {
+            app->log->debug("Query $this_node for games: LINK FAILED $ssh->{'error'}");
+            next;
+        }
 
         delete $return_hash{$this_node}{'offline'};
 
@@ -1490,12 +1495,16 @@ sub connectSSH {
 
     my $PID = $$;
 
-    $args{'user'} || return "Aborting SSH: must specify username";
-    $args{'ip'}   || return "Aborting SSH: must specify ip";
+    unless ( defined $args{'user'} and defined $args{'ip'} ) {
+        app->log->warn("Failed to establish SSH: missing username or ip  $args{'user'} $args{'ip'}");
+        $args{'error'} = "Failed to establish SSH: missing username or ip  $args{'user'} $args{'ip'}";
+        delete $args{'link'};
+        return \%args;
+    }
 
     $args{'connection'} = $args{'user'} . "@" . $args{'ip'};
 
-    ## Check for fork context shift
+    ## Check for fork and clear previous context
     if ( $ssh_master{ $PID.$args{'user'}.$args{'ip'} } ) {
         $args{'link'} = $ssh_master{ $PID.$args{'user'}.$args{'ip'} };
     }
@@ -1511,6 +1520,7 @@ sub connectSSH {
             return \%args;
         }
         else {
+            app->log->debug("Master socket is NOT HEALTHY $PID.$args{'user'}.$args{'ip'}");
             $args{'link'}->disconnect();
             delete $args{'link'};
         }
@@ -1544,14 +1554,14 @@ sub connectSSH {
     }
 
     if ( $args{'link'}->error ) {
-        $args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
+        #$args{'error'} = "Failed to establish SSH: " . $args{'connection'} . ": " . $args{'link'}->error;
         app->log->warn("Failed to establish SSH: ". $args{'connection'} . ": " . $args{'link'}->error);
         delete $args{'link'};
     }
     else {
         app->log->debug("SSH established " . $args{'connection'} . ": " . $args{'link'}->error);
-        return \%args;
     }
+    return \%args;
 }
 
 
