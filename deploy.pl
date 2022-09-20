@@ -648,7 +648,7 @@ websocket '/logfile-ws' => sub {
     my $user;
     my $loop;
 
-    $self->inactivity_timeout(900);
+    $self->inactivity_timeout(1800);
 
     app->log->debug("reading logfile via websocket");
 
@@ -661,7 +661,7 @@ websocket '/logfile-ws' => sub {
                     user        => $user,
                     game        => $game,
                  );
-        
+
         if ( $results->{'new_content'} ) {
             my $content;
             foreach ( split( /\n/, ( $results->{'new_content'} ) ) ) {
@@ -694,14 +694,14 @@ get '/serverlog/:task' => sub ($c) {
         $c->flash(message => "logfile cleared");
         $c->redirect_to($c->req->headers->referrer);
     };
-    
+
     if ( $task eq 'info' or $task eq 'debug' or $task eq 'trace' ) {
         app->log->level($task);
         app->log->debug("logging level changed to $task");
         $c->flash(message => "logging level changed to $task");
         $c->redirect_to($c->req->headers->referrer);
     };
-    
+
     $c->flash(message => "$task..yeah nagh");
     $c->redirect_to($c->req->headers->referrer);
 
@@ -720,7 +720,7 @@ websocket '/log/:node/<game>-ws' => sub {
 
     my $loop;
 
-    $self->inactivity_timeout(900);
+    $self->inactivity_timeout(1800);
 
     app->log->info("opening websocket for $user to read $game logfile on $node");
 
@@ -1045,9 +1045,10 @@ sub readLog {
     return $ssh->{'debug'} if $ssh->{'debug'};
 
     $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
-    Time::HiRes::sleep( 0.2 );
+    Time::HiRes::sleep( 0.4 );
 
     $args{'line_count'} = '1' unless $args{'line_count'};
+
     my  $cmd;
         $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
         $cmd .= q(sed -n '/^>$/d;);
@@ -1059,12 +1060,8 @@ sub readLog {
     app->log->debug($cmd);
 
     my $logfile =  $ssh->{'link'}->capture($cmd);
-       $logfile =~ s/\n/<new>/g;
-       $logfile =~ s/<new>>/\n>/g;
-       $logfile =~ s/<new>\[/\n[/g;
-       $logfile =~ s/<new>\*/\n*/g;
-       $logfile =~ s/<new>//g;
-    
+       $logfile =~ s/(.{79})\n/\1/g; # Vertial term wraps at 80 characters
+
       return $logfile;
 }
 
@@ -1765,10 +1762,9 @@ sub bootGame {
 
     my @cmd = qq(screen -S $game -X colon "logfile flush 5^M");
     $ssh->{'link'}->system(@cmd);
-    
-    @cmd = qq(screen -S $game -X colon "width 132");
+
     $ssh->{'link'}->system(@cmd);
-    
+
 
     sleep(10);
 
@@ -1976,8 +1972,8 @@ body  {
 .data a, .data span, .data tr, .data td { white-space: pre; }
 
 #command-content{
-    text-indent: -110px;
-    padding-left: 115px; font-size: small; color: #41FF00;
+    text-indent: -20px;
+    padding-left: 25px; font-size: small; color: #41FF00;
     height: 65vh;
     overflow: auto;
     display: flex;
@@ -2585,7 +2581,7 @@ window.setTimeout(function() {
         <div id='command-content' class="text-wrap container-sm text-break">
             %# This is the command output
         </div>
-        
+
         <!-- /serverlog/:task   -->
         <div class="d-grid gap-2 d-md-block">
             <a class="btn btn-outline-warning" href="/serverlog/clear" role="button">clear</a>
@@ -2695,7 +2691,7 @@ window.setTimeout(function() {
         </div>
 <!-- Console Form -->
             <span class="input-group-text" id="inputGroup-sizing-sm"><b><%= $game %>@<%= $node %> :~ </small></b></span>
-            <input type="text" class="form-control" id="cmd" placeholder="console"
+            <input type="text" autocomplete="off" class="form-control" id="cmd" placeholder="console"
               aria-label="Sizing example input" aria-describedby="inputGroup-sizing-sm">
         </div>
 </body>
