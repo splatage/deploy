@@ -25,6 +25,7 @@ use warnings;
 ###########################################################
 
 my %ssh_master;
+my %notify;
 
 ###########################################################
 ##   Database Connection and Logging                     ##
@@ -67,6 +68,8 @@ my $db = Mojo::mysql->strict_mode($db_string);
 plugin Minion => { mysql => "$db_string" };
 
 app->log->path(app->home->rel_file(app->moniker . '.log'));
+
+my $log_level;
 app->log->level($config->{'log_level'});
 
 if ( $config->{"secret"}) {
@@ -171,6 +174,13 @@ app->yancy->plugin(
         password_digest => {
             type => 'SHA-512'
         }
+    }
+);
+
+app->yancy->plugin( Roles => {
+    schema => 'users',
+    userid_field => 'username',
+    role_field   => 'role'
     }
 );
 
@@ -638,7 +648,7 @@ websocket '/logfile-ws' => sub {
     my $user;
     my $loop;
 
-    $self->inactivity_timeout(600);
+    $self->inactivity_timeout(900);
 
     app->log->debug("reading logfile via websocket");
 
@@ -651,11 +661,14 @@ websocket '/logfile-ws' => sub {
                     user        => $user,
                     game        => $game,
                  );
-
+        
         if ( $results->{'new_content'} ) {
-            foreach ( split ( /\n/, $results->{'new_content'} ) ) {
-                $self->send($_);
+            my $content;
+            foreach ( split( /\n/, ( $results->{'new_content'} ) ) ) {
+                ++$line_count;
+                $content = '<div>' . $_ . "</div>\n" . $content;
             }
+            $self->send( $content );
         }
     };
 
@@ -665,23 +678,38 @@ websocket '/logfile-ws' => sub {
     });
 
     $send_data->();
-    $loop = Mojo::IOLoop->recurring($config->{'poll_interval'}, $send_data);
+    $loop = Mojo::IOLoop->recurring( 1, $send_data );
 };
 
 
-get '/clearlogfile' => sub ($c) {
-    my $file = app->log->path;
-    truncate $file, 0;
+get '/serverlog/:task' => sub ($c) {
 
-    app->log->debug("log file cleared");
+    my $task = $c->stash->{'task'};
 
-    $c->flash(message => "logfile cleared");
-    $c->redirect_to("/logfile");
+    if ( $task eq 'clear' ) {
+        my $file = app->log->path;
+        truncate $file, 0;
+        app->log->debug("log file cleared");
+
+        $c->flash(message => "logfile cleared");
+        $c->redirect_to($c->req->headers->referrer);
+    };
+    
+    if ( $task eq 'info' or $task eq 'debug' or $task eq 'trace' ) {
+        app->log->level($task);
+        app->log->debug("logging level changed to $task");
+        $c->flash(message => "logging level changed to $task");
+        $c->redirect_to($c->req->headers->referrer);
+    };
+    
+    $c->flash(message => "$task..yeah nagh");
+    $c->redirect_to($c->req->headers->referrer);
+
 };
 
 
 websocket '/log/:node/<game>-ws' => sub {
-    my $line_count;
+    my $line_count=0;
     my $self = shift;
     my $results;
 
@@ -692,7 +720,7 @@ websocket '/log/:node/<game>-ws' => sub {
 
     my $loop;
 
-    $self->inactivity_timeout(600);
+    $self->inactivity_timeout(900);
 
     app->log->info("opening websocket for $user to read $game logfile on $node");
 
@@ -710,12 +738,13 @@ websocket '/log/:node/<game>-ws' => sub {
             ssh_master  => $config->{'ssh_master'}
         );
 
-        foreach my $content ( split ( /\n/, ( $logdata) ) ) {
-            ++$line_count;
-            $content = '<div>' . $content . "</div>\n";
+        my $content;
 
-            $self->send( $content );
-        }
+        foreach ( split( /\n/, ( $logdata ) ) ) {
+            ++$line_count;
+            $content = "<div>" . $_ . "</div>\n" . $content;
+        };
+        $self->send( $content );
    };
 
     $self->on(json => sub {
@@ -727,9 +756,12 @@ websocket '/log/:node/<game>-ws' => sub {
                         ssh_master  => $config->{'minion_ssh_master'}
          );
 
-         $c->send( $game . "@" . $node . " :~ " . $hash->{cmd} );
+         # $c->send($user."@".$game.": ".$hash->{cmd} );
          app->log->warn("$user sent console command to $game on $node:");
          app->log->warn(" # $hash->{cmd}");
+         Time::HiRes::sleep( 0.2 );
+         #sleep(1);
+         $send_data->();
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
@@ -830,7 +862,7 @@ sub updatePage_game {
     my $iteration = 0;
     my $new_content = '';
 
-    foreach ( split ( /\n/, ( $args{'logdata'} ) ) ) {
+    foreach ( split( /\n/, ( $args{'logdata'} ) ) ) {
         ++$iteration;
 
         #if ( $iteration > $args{'line_count'} ) {
@@ -966,17 +998,13 @@ sub readLog {
     my %args        = (
         game        => '',
         node        => '',
-        line_count  => '1',
+        line_count  => '',
         @_,    # argument pair list goes here
     );
     my $game = $args{'game'} or return 1;
     my $node = $args{'node'} or return 1;
 
-    $args{'line_count'} = '1' unless $args{'line_count'};
-
-    app->log->debug("line count: $args{'line_count'}");
-
-    my $return_string;
+    app->log->debug("$game log has $args{'line_count'} lines");
 
     my $ip = readFromDB(
         table    => 'nodes',
@@ -1016,30 +1044,28 @@ sub readLog {
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    #$line_count = 1;
+    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
+    Time::HiRes::sleep( 0.2 );
 
-    my  $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
-        $cmd .= q(sed -n ');
+    $args{'line_count'} = '1' unless $args{'line_count'};
+    my  $cmd;
+        $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
+        $cmd .= q(sed -n '/^>$/d;);
         $cmd .= $args{'line_count'};
         $cmd .= q(,$p' < ~/);
-        $cmd .= qq($game/game_files/screenlog.0);
+        $cmd .= qq($game/game_files/hardcopy.0);
+
 
     app->log->debug($cmd);
 
-    my  $logfile  = $ssh->{'link'}->capture($cmd);
-
-    my @lines = split( /\n/, $logfile );
-
-    foreach my $line (@lines) {
-        $line =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;
-        $line =~ s/\r//g;
-        $line =~ s/\007//g;
-        $line =~ s/[^[:print:]]//g;
-        $line =~ s/ /\&nbsp;/g;
-
-        $return_string .= $line . "\n";
-    }
-    return $return_string;
+    my $logfile =  $ssh->{'link'}->capture($cmd);
+       $logfile =~ s/\n/<new>/g;
+       $logfile =~ s/<new>>/\n>/g;
+       $logfile =~ s/<new>\[/\n[/g;
+       $logfile =~ s/<new>\*/\n*/g;
+       $logfile =~ s/<new>//g;
+    
+      return $logfile;
 }
 
 sub readFromDB {
@@ -1460,28 +1486,13 @@ sub sendCommand {
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );   #or die "Error establishing SSH" ;
 
-#    $ssh->{'link'}->system("screen -p 0 -S $game -X clear");
-#    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
     $ssh->{'link'}->system(
         "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
-
     app->log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
           . $command
           . "\"^M'" );
-
-#    Time::HiRes::sleep(0.05);
-
-#    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy");
-#    $results = $ssh->{'link'}->capture("cat $game/game_files/hardcopy.0");
-
-#    @results = split( '\n', $results );
-#    $results = $results if /\S/;
-#    $results = $results if s/[^[:ascii:]]//g, $results;
-#    foreach (@results) {
-#        app->log->debug("$game SCREEN: $_");
-#    }
     return;
-#    return $results;
+
 }
 
 
@@ -1667,9 +1678,10 @@ sub storeGame {
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    my $rsync_cmd  = q(rsync -auv --delete --exclude='plugins/*jar' --exclude='screenlog.0' );
-       $rsync_cmd .= q(-e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no );
-       $rsync_cmd .= qq(-o BatchMode=yes' $cp_from $cp_to );
+    my $rsync_cmd  = q( rsync -auv --delete );
+       $rsync_cmd .= q( --exclude='plugins/*jar' --exclude='hardcopy.*' --exclude='screenlog.*' );
+       $rsync_cmd .= q( -e 'ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no );
+       $rsync_cmd .= qq( -o BatchMode=yes' $cp_from $cp_to );
 
     app->log->debug("$rsync_cmd");
 
@@ -1731,7 +1743,7 @@ sub bootGame {
     my $invocation;
     $invocation = "cd " . $settings->{$game}{'node_path'};
     $invocation .= "/" . $game . "/game_files";
-    $invocation .= " && screen -h 1024 -L -dmS " . $game;
+    $invocation .= " && screen -h 50000 -L -dmS " . $game;
     $invocation .= " " . $settings->{$game}{'java_bin'};
     $invocation .= " -Xms" . $settings->{$game}{'mem_min'};
     $invocation .= " -Xmx" . $settings->{$game}{'mem_max'};
@@ -1751,8 +1763,12 @@ sub bootGame {
 
     $ssh->{'link'}->system("$invocation");
 
-    my @cmd = qq(screen -S $game -X colon "logfile flush 2^M");
+    my @cmd = qq(screen -S $game -X colon "logfile flush 5^M");
     $ssh->{'link'}->system(@cmd);
+    
+    @cmd = qq(screen -S $game -X colon "width 132");
+    $ssh->{'link'}->system(@cmd);
+    
 
     sleep(10);
 
@@ -1891,14 +1907,17 @@ sub infoNode {
     print "$con_cmd\n";
 
     my $iperf = "
-Field    Meaning of Non-Zero Values
-errors    Poorly or incorrectly negotiated mode and speed, or damaged network cable.
+-------------------------------------
+Field      Meaning of Non-Zero Values
+-------------------------------------
+
+errors     Poorly or incorrectly negotiated mode and speed, or damaged network cable.
 dropped    Possibly due to iptables or other filtering rules, more likely due to lack of network buffer memory.
 overrun    Number of times the network interface ran out of buffer space.
 carrier    Damaged or poorly connected network cable, or switch problems.
 collsns    Number of collisions, which should always be zero on a switched LAN.
-         Non-zero indicates problems negotiating appropriate duplex mode.
-         A small number that never grows means it happened when the interface came up but hasn't happened since.
+           Non-zero indicates problems negotiating appropriate duplex mode.
+           A small number that never grows means it happened when the interface came up but hasn't happened since.
 ";
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
@@ -1957,8 +1976,8 @@ body  {
 .data a, .data span, .data tr, .data td { white-space: pre; }
 
 #command-content{
-    text-indent: -26px;
-    padding-left: 36px; font-size: small; color: #41FF00;
+    text-indent: -110px;
+    padding-left: 115px; font-size: small; color: #41FF00;
     height: 65vh;
     overflow: auto;
     display: flex;
@@ -2566,9 +2585,14 @@ window.setTimeout(function() {
         <div id='command-content' class="text-wrap container-sm text-break">
             %# This is the command output
         </div>
-              <div class="col-2">
-            <a class="btn btn-outline-success" href="/clearlogfile" role="button">clear logfile</a>
-          </div>
+        
+        <!-- /serverlog/:task   -->
+        <div class="d-grid gap-2 d-md-block">
+            <a class="btn btn-outline-warning" href="/serverlog/clear" role="button">clear</a>
+            <a class="btn btn-outline-success" href="/serverlog/info" role="button">info</a>
+            <a class="btn btn-outline-success" href="/serverlog/debug" role="button">debug</a>
+            <a class="btn btn-outline-success" href="/serverlog/trace" role="button">trace</a>
+        </div>
   </div>
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script type="text/javascript">
