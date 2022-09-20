@@ -1060,7 +1060,7 @@ sub readLog {
     app->log->debug($cmd);
 
     my $logfile =  $ssh->{'link'}->capture($cmd);
-       $logfile =~ s/(.{79})\n/\1/g; # Vertial term wraps at 80 characters
+       $logfile =~ s/(.{79})\n/$1/g; # Vertial term wraps at 80 characters
 
       return $logfile;
 }
@@ -1089,7 +1089,7 @@ sub readFromDB {
     app->log->debug("sub readFromDB: PID: $pid Connecting to DB table:$table column:$column field:$field value:$value" );
 
     $dbh{$pid} = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
-       "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1, AutoCommit => 0 } );
+       "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1, AutoCommit => 1 } );
 
     my ( $ref, $ref_name, $ref_value );
     my $result = {};
@@ -1709,10 +1709,13 @@ sub bootGame {
     my %args = (
         game       => '',
         server_bin => '',
+        upgrade    => '',
         @_,    # argument pair list goes here
     );
 
     my $game = $args{'game'};
+
+    my $upgrade = "--forceUpgrade" if $args{'upgrade'};
 
     my ( $user, $suser, $cp_to, $cp_from );
 
@@ -1737,21 +1740,27 @@ sub bootGame {
         hash_ref => 'false'
     );
 
-    my $invocation;
-    $invocation = "cd " . $settings->{$game}{'node_path'};
-    $invocation .= "/" . $game . "/game_files";
-    $invocation .= " && screen -h 50000 -L -dmS " . $game;
-    $invocation .= " " . $settings->{$game}{'java_bin'};
-    $invocation .= " -Xms" . $settings->{$game}{'mem_min'};
-    $invocation .= " -Xmx" . $settings->{$game}{'mem_max'};
-    $invocation .= " " . $settings->{$game}{'java_flags'};
-    $invocation .= " -jar " . $args{'server_bin'};
-    $invocation .= " --forceUpgrade";
-    $invocation .= " --port " . $settings{$game}{'port'};
-    $invocation .= " nogui server";
-    $invocation =~ s/\n+/ /g;
+    my $path = qq( $settings->{$game}{'node_path'}/$game/game_files );
+    my $boot_strap;
+       $boot_strap  = qq( mkdir -p $path && cd $path  && );
+       $boot_strap .= qq( echo "eula=true" > eula.txt && );
+       $boot_strap .= qq( [ -f spigot.yml ] && sed -i '/bungeecord:/s/false/true/' spigot.yml && );
+       $boot_strap .= qq( [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml && );
+       $boot_strap .= qq( [ -f server.properties ] && sed -i '/online-mode=/s/true/false' server.properties  );
 
-    app->log->trace("$invocation");
+
+    my $invocation;
+       $invocation  = qq( cd $path && screen -h 50000 -L -dmS $game );
+       $invocation .= qq( $settings->{$game}{'java_bin'} );
+       $invocation .= qq( -Xms$settings->{$game}{'mem_min'} );
+       $invocation .= qq( -Xmx$settings->{$game}{'mem_max'} );
+       $invocation .= qq( $settings->{$game}{'java_flags'} );
+       $invocation .= qq( -jar $args{'server_bin'} $upgrade );
+       $invocation .= qq( --port $settings{$game}{'port'} );
+       $invocation .= qq( nogui server );
+       $invocation =~ s/\n+/ /g;s/  / /g;
+
+    app->log->debug("$invocation");
     $user = $settings->{$game}{'node_usr'};
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
