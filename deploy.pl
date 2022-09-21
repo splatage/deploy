@@ -766,9 +766,10 @@ get '/serverlog/:task' => sub ($c) {
 
 
 websocket '/log/:node/<game>-ws' => sub {
-    my $line_count=1;
+    my $line_count;
     my $self = shift;
-    my $results;
+    my $logdata = {};
+
 
     my $node = $self->stash('node');
     my $game = $self->stash('game');
@@ -788,7 +789,7 @@ websocket '/log/:node/<game>-ws' => sub {
 
         app->log->debug("$$ websocket: polling $game on $node ");
 
-        my $logdata     = readLog(
+           $logdata     = readLog(
             node        => $node,
             game        => $game,
             line_count  => $line_count,
@@ -797,11 +798,14 @@ websocket '/log/:node/<game>-ws' => sub {
 
         my $content;
 
-        foreach ( split( /\n/, ( $logdata ) ) ) {
+        foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
             ++$line_count;
+            ++$logdata->{'line_count'};
             $content = "<div>" . $_ . "</div>\n" . $content;
         };
         $self->send( $content );
+        $logdata->{'content'} = "";
+        $line_count = $logdata->{'line_count'};
    };
 
     $self->on(json => sub {
@@ -813,11 +817,10 @@ websocket '/log/:node/<game>-ws' => sub {
                         ssh_master  => $config->{'minion_ssh_master'}
          );
 
-         # $c->send($user."@".$game.": ".$hash->{cmd} );
          app->log->warn("$user sent console command to $game on $node:");
          app->log->warn(" # $hash->{cmd}");
          Time::HiRes::sleep( 0.2 );
-         #sleep(1);
+
          $send_data->();
     });
 
@@ -826,11 +829,9 @@ websocket '/log/:node/<game>-ws' => sub {
         Mojo::IOLoop->remove($loop);
     });
 
-
     $send_data->();
     $loop = Mojo::IOLoop->recurring($config->{'poll_interval'}, $send_data);
 };
-
 
 
 get '/log/:node/:game' => sub ($c) {
@@ -1056,13 +1057,10 @@ sub readLog {
     my %args        = (
         game        => '',
         node        => '',
-        line_count  => '',
         @_,    # argument pair list goes here
     );
     my $game = $args{'game'} or return 1;
     my $node = $args{'node'} or return 1;
-
-    app->log->debug("$game log has $args{'line_count'} lines");
 
     my $ip = readFromDB(
         table    => 'nodes',
@@ -1082,13 +1080,13 @@ sub readLog {
 
     my $settings = readFromDB(
         table    => 'games',
-        column   => 'node_usr',
+        column   => 'name',
         field    => 'name',
         value    => $game,
-        hash_ref => 'false'
+        hash_ref => 'true'
     );
 
-    unless ( $settings{$game}{'node_usr'} ) {
+    unless ( defined $settings->{$game}{'node_usr'} ) {
         my $warning = '<div class="alert alert-danger" role="alert">';
         $warning .= '!! WARNING !! <a href="/yancy#/games" class="alert-link">';
         $warning .=
@@ -1097,30 +1095,32 @@ sub readLog {
         return $warning;
     }
 
-    my $ssh = connectSSH( user => $settings{$game}{'node_usr'}, ip => $ip, ssh_master => $args{'ssh_master'} );
+    my $ssh = connectSSH( user => $settings->{$game}{'node_usr'}, ip => $ip, ssh_master => $args{'ssh_master'} );
 
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    #$ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
-    my $reset = $ssh->{'link'}->capture("screen -p 0 -S $game -X hardcopy -h; screen -S $game -X select . ; echo $?");
+    $args{'line_count'} = '1' unless ( $args{'line_count'} );
 
-    unless ( $reset eq 0 ) {
-        $line_count = 1;
-        app->log->trace("$game screen is offline");
-       return;
+    my $reset = $ssh->{'link'}->capture("screen -ls $game");
+
+    app->log->debug("$game log has $args{'line_count'} lines");
+    unless ( $reset =~ /There is a screen/ ) {
+        $args{'line_count'} = 1;
+        app->log->trace("$game screen is offline. $reset");
+       return \%args;
     }
+    else {
 
-    Time::HiRes::sleep( 0.4 );
-
-    #$args{'line_count'} = '1' unless $args{'line_count'};
+    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
+    Time::HiRes::sleep( 0.2 );
 
     my  $cmd;
         $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
         $cmd .= q(sed -n '/^>$/d;);
-        $cmd .= $line_count;
+        $cmd .= $args{'line_count'};
         $cmd .= q(,$p' < );
-        $cmd .= qq($settings{$game}{'node_path'}/$game/game_files/hardcopy.0);
+        $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/hardcopy.0);
 
 
     app->log->debug($cmd);
@@ -1128,7 +1128,10 @@ sub readLog {
     my $logfile =  $ssh->{'link'}->capture($cmd);
        $logfile =~ s/([^\n]{80})\n/$1/g; # Vertial term wraps at 80 characters
 
-      return $logfile;
+       $args{'content'} = $logfile;
+
+      return \%args;
+      }
 }
 
 
