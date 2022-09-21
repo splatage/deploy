@@ -72,12 +72,8 @@ app->log->path(app->home->rel_file(app->moniker . '.log'));
 my $log_level;
 app->log->level($config->{'log_level'});
 
-if ( $config->{"secret"}) {
-    app->secrets([$config->{'secret'}]);
-}
-else {
-    app->secrets([rand]);
-}
+( $config->{"secret"} ) ? app->secrets([$config->{'secret'}]) : app->secrets([rand]);
+
 
 
 plugin 'RemoteAddr';
@@ -130,6 +126,9 @@ plugin Yancy => {
                 },
             },
         },
+        roles                   => {
+            'x-id-field'        => 'username',
+        },
     },
     editor => {
         require_user => { is_admin => 1 },
@@ -178,7 +177,7 @@ app->yancy->plugin(
 );
 
 app->yancy->plugin( Roles => {
-    schema => 'users',
+    schema => 'roles',
     userid_field => 'username',
     role_field   => 'role'
     }
@@ -261,6 +260,64 @@ app->minion->add_task(
     }
 );
 
+## BootStrap   #################################################
+
+get '/bootstrap/:game/:node' => sub ($c) {
+
+    my $task = 'bootstrap';
+    my $node = $c->stash('node');
+    my $game = $c->stash('game');
+
+    $c->minion->enqueue( $task => [$game], { attempts => 2, expire => 120 } );
+
+    $c->flash( message => "sending minions to $task $game on $node " );
+
+    $c->redirect_to("/log/$node/$game");
+};
+app->minion->add_task(
+    bootstrap => sub ( $job, $game ) {
+        my $task = 'bootstrap';
+        my $lock = $game;
+
+        return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"} )
+          unless app->minion->lock( $lock, 300 );
+
+        my $bootstrap = bootStrap( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
+        $job->note( '1_bootstrap' => "$game $bootstrap" );
+
+        my $update = update( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
+        $job->note( '2_update' => "$game $update" );
+
+        my $boot = bootGame( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
+        $job->note( '3_boot' => "$game $boot" );
+
+        sleep(60);
+
+        my $halt = haltGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
+        $job->note( '4_halt' => "$game $halt" );
+
+        my $rebootstrap = bootStrap( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
+        $job->note( '5_bootstrap' => "$game $rebootstrap" );
+
+        my $reboot = bootGame( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
+        $job->note( '6_boot' => "$game $reboot" );
+
+        my $regist = registerGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
+        $job->note( '7_register' => "$game $regist" );
+
+        $job->app->log->info("$task $game completed");
+
+        unless ($reboot) {
+            $job->finish( { message => "$task $game completed" } );
+        }
+        else {
+            $job->fail( { message => "$task $game failed" } );
+        }
+        app->minion->unlock($lock);
+    }
+);
+
+
 ## Boot   #################################################
 
 get '/boot/:game/:node' => sub ($c) {
@@ -283,16 +340,16 @@ app->minion->add_task(
           unless app->minion->lock( $lock, 300 );
 
         my $deploy = deployGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( deploy => "$game $deploy" );
+        $job->note( '1_deploy' => "$game $deploy" );
 
         my $update = update( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( update => "$game $update" );
+        $job->note( '2_update' => "$game $update" );
 
         my $boot = bootGame( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( boot => "$game $boot" );
+        $job->note( '3_boot' => "$game $boot" );
 
         my $regist = registerGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( register => "$game $regist" );
+        $job->note( '4_register' => "$game $regist" );
 
         $job->app->log->info("$task $game completed");
         unless ($boot) {
@@ -328,9 +385,9 @@ app->minion->add_task(
         $job->app->log->info("Job: $task $game begins");
 
         my $store = storeGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( store => "$game $store" );
+        $job->note( '1_store' => "$game $store" );
         my $halt = haltGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( halt => "$game $halt" );
+        $job->note( '2_halt' => "$game $halt" );
 
         $job->app->log->info("$task $game completed");
         $job->finish( { message => "$task $game completed" } );
@@ -362,7 +419,7 @@ app->minion->add_task(
         $job->app->log->info("Job: $task $game begins");
 
         my $output = deployGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( deploy => "$game $output" );
+        $job->note( '1_deploy' => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish(
@@ -395,7 +452,7 @@ app->minion->add_task(
         $job->app->log->info("Job: $task $game begins");
 
         my $output = storeGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( store => "$game $output" );
+        $job->note( '1_store' => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish(
@@ -427,7 +484,7 @@ app->minion->add_task(
         $job->app->log->info("Job: $task $game begins");
 
         my $output = registerGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( register => "$game $output" );
+        $job->note( '1_register' => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish( { message => "$task $game completed" } );
@@ -458,7 +515,7 @@ app->minion->add_task(
         $job->app->log->info("Job: $task $game begins");
 
         my $output = deregisterGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
-        $job->note( deregister => "$game $output" );
+        $job->note( '1_deregister' => "$game $output" );
 
         $job->app->log->info("$task $game completed");
         $job->finish( { message => "$task $game completed" } );
@@ -709,7 +766,7 @@ get '/serverlog/:task' => sub ($c) {
 
 
 websocket '/log/:node/<game>-ws' => sub {
-    my $line_count=0;
+    my $line_count=1;
     my $self = shift;
     my $results;
 
@@ -773,6 +830,7 @@ websocket '/log/:node/<game>-ws' => sub {
     $send_data->();
     $loop = Mojo::IOLoop->recurring($config->{'poll_interval'}, $send_data);
 };
+
 
 
 get '/log/:node/:game' => sub ($c) {
@@ -987,10 +1045,10 @@ sub update {
       split( / /, $ssh->{'link'}->capture("$cmd") );
 
     if ( $sha_file[0] eq $sha256 ) {
-        return "$file_name SHA: $sha256";
+        return "$file_name SHA passed";
     }
     else {
-        return 0;
+        return "$file_name corrupted";
     }
 }
 
@@ -1044,15 +1102,23 @@ sub readLog {
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
+    #$ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
+    my $reset = $ssh->{'link'}->capture("screen -p 0 -S $game -X hardcopy -h; screen -S $game -X select . ; echo $?");
+
+    unless ( $reset eq 0 ) {
+        $line_count = 1;
+        app->log->trace("$game screen is offline");
+       return;
+    }
+
     Time::HiRes::sleep( 0.4 );
 
-    $args{'line_count'} = '1' unless $args{'line_count'};
+    #$args{'line_count'} = '1' unless $args{'line_count'};
 
     my  $cmd;
         $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
         $cmd .= q(sed -n '/^>$/d;);
-        $cmd .= $args{'line_count'};
+        $cmd .= $line_count;
         $cmd .= q(,$p' < ~/);
         $cmd .= qq($game/game_files/hardcopy.0);
 
@@ -1060,10 +1126,11 @@ sub readLog {
     app->log->debug($cmd);
 
     my $logfile =  $ssh->{'link'}->capture($cmd);
-       $logfile =~ s/(.{79})\n/$1/g; # Vertial term wraps at 80 characters
+       $logfile =~ s/([^\n]{80})\n/$1/g; # Vertial term wraps at 80 characters
 
       return $logfile;
 }
+
 
 sub readFromDB {
     my %args = (
@@ -1089,7 +1156,14 @@ sub readFromDB {
     app->log->debug("sub readFromDB: PID: $pid Connecting to DB table:$table column:$column field:$field value:$value" );
 
     $dbh{$pid} = DBI->connect( "DBI:mysql:database=$config->{'db_name'};host=$config->{'db_host'}",
-       "$config->{'db_user'}", "$config->{'db_pass'}", { 'RaiseError' => 1, AutoCommit => 1 } );
+                "$config->{'db_user'}",
+                "$config->{'db_pass'}",
+                {
+                    RaiseError => 0,
+                    PrintError => 0,
+                    AutoCommit => 0
+                }
+            ) or app->log->warn("cannot connect to the database: $DBI::errstr" );
 
     my ( $ref, $ref_name, $ref_value );
     my $result = {};
@@ -1107,8 +1181,8 @@ sub readFromDB {
     $query .= ";";
     app->log->debug("$query");
 
-    my $sth = $dbh{$pid}->prepare($query);
-    $sth->execute();
+    my $sth = $dbh{$pid}->prepare($query) or app->log->warn("error preparing SQL: $DBI::errstr" );
+    $sth->execute() or app->log->warn("error executing SQL: $DBI::errstr" );
 
     while ( $ref = $sth->fetchrow_hashref() ) {
         my $index_name;
@@ -1121,9 +1195,13 @@ sub readFromDB {
         }
     }
 
-    $sth->finish();
-    $dbh{$pid}->disconnect;
+    app->log->warn("error fetching data from DB: $DBI::errstr" ) if $DBI::errstr;
+
+    $dbh{$pid}->disconnect or app->log->warn("error disconnecting from DB: $DBI::errstr" );;
+
     app->log->debug("DB query complete");
+
+#    app->log->debug("DB error code: ""$dbh{$pid}->errstr");
 
     if ( $args{'hash_ref'} eq 'true' ) {
         return \%result;
@@ -1742,8 +1820,9 @@ sub bootGame {
 
     my $path = qq( $settings->{$game}{'node_path'}/$game/game_files );
     my $boot_strap;
-       $boot_strap  = qq( mkdir -p $path && cd $path  && );
+       $boot_strap  = qq( mkdir -p $path/logs && cd $path  && );
        $boot_strap .= qq( echo "eula=true" > eula.txt && );
+       $boot_strap .= qq( touch logs/gc.log && );
        $boot_strap .= qq( [ -f spigot.yml ] && sed -i '/bungeecord:/s/false/true/' spigot.yml && );
        $boot_strap .= qq( [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml && );
        $boot_strap .= qq( [ -f server.properties ] && sed -i '/online-mode=/s/true/false' server.properties  );
@@ -1767,13 +1846,11 @@ sub bootGame {
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
+    #$ssh->{'link'}->system("$boot_strap");
     $ssh->{'link'}->system("$invocation");
 
     my @cmd = qq(screen -S $game -X colon "logfile flush 5^M");
     $ssh->{'link'}->system(@cmd);
-
-    $ssh->{'link'}->system(@cmd);
-
 
     sleep(10);
 
@@ -1786,6 +1863,93 @@ sub bootGame {
         return 1;
     }
 }
+
+sub bootStrap {
+    my %args = (
+        game       => '',
+        server_bin => '',
+        upgrade    => '',
+        @_,    # argument pair list goes here
+    );
+
+    my $game = $args{'game'};
+
+    return "$game is already online"
+      if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) );
+
+    my $settings = readFromDB(
+        table    => 'games',
+        column   => 'name',
+        field    => 'name',
+        value    => $game,
+        hash_ref => 'true'
+    );
+
+    my $ip = readFromDB(
+        table    => 'nodes',
+        column   => 'ip',
+        field    => 'name',
+        value    => $settings->{$game}{'node'},
+        hash_ref => 'false'
+    );
+
+    app->log->info("bootstrap $game begin");
+
+    my $user = $settings->{$game}{'node_usr'};
+    my $ssh  = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
+    return $ssh->{'error'} if $ssh->{'error'};
+    return $ssh->{'debug'} if $ssh->{'debug'};
+
+
+    my $path = qq($settings->{$game}{'node_path'}/$game/game_files);
+
+    my $boot_strap;
+    my $task;
+    my $output;
+
+    $task       = qq( bootstrap $game: creating paths );
+    $boot_strap = qq( mkdir -p $path/logs );
+       $ssh->{'link'}->system("$boot_strap");
+       app->log->info("$task success $boot_strap");
+       $output .= $output . "\n" . $task;
+
+    $task       = qq( bootstrap $game: eula.txt );
+    $boot_strap = qq( cd $path;  echo "eula=true" > eula.txt );
+       $ssh->{'link'}->system("$boot_strap");
+       app->log->info("$task success $boot_strap");
+       $output .= $output . "\n" . $task;
+
+    $task       = qq( bootstrap $game: log files );
+    $boot_strap = qq( touch $path/logs/gc.log );
+       $ssh->{'link'}->system("$boot_strap");
+       app->log->info("$task success $boot_strap");
+       $output .= $output . "\n" . $task;
+
+    $task       = qq( bootstrap $game: spigot.yml );
+    $boot_strap = qq( cd $path; [ -f spigot.yml ] && sed -i '/bungeecord:/s/false/true/' spigot.yml );
+       $ssh->{'link'}->system("$boot_strap");
+       app->log->info("$task success $boot_strap");
+       $output .= $output . "\n" . $task;
+
+    $task       = qq( bootstrap $game: paper.yml );
+    $boot_strap = qq( cd $path; [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml );
+       $ssh->{'link'}->system("$boot_strap");
+       app->log->info("$task success $boot_strap");
+       $output .= $output . "\n" . $task;
+
+    $task       = qq( bootstrap $game: server properties );
+    $boot_strap = qq( cd $path; [ -f server.properties ] && sed -i '/online-mode=/s/true/false/' server.properties );
+       $ssh->{'link'}->system("$boot_strap");
+       app->log->info("$task success $boot_strap");
+       $output .= $output . "\n" . $task;
+
+    $task       = "bootstrap environment prepared";
+       app->log->info("$task");
+       $output .= $output . "\n" . $task;
+
+       return $output;
+}
+
 
 
 sub deployGame {
@@ -2687,6 +2851,8 @@ window.setTimeout(function() {
                         class="list-group-item list-group-item-action list-group-item-dark">halt</a>
                     <a href="/boot/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-dark">boot</a>
+                    <a href="/bootstrap/<%= $game %>/<%= $node %>"
+                        class="list-group-item list-group-item-action list-group-item-dark">bootstrap</a>
                 </div>
 
                 % } else {
