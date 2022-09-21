@@ -1072,7 +1072,7 @@ sub readLog {
         hash_ref => 'false'
     );
 
-    if ( !$ip ) {
+    unless ( $ip ) {
         my $warning = '<div class="alert alert-danger" role="alert">';
         $warning .= '!! WARNING !! <a href="/yancy#/nodes" class="alert-link">';
         $warning .= "$node is miss-configured in the nodes table in database";
@@ -1080,7 +1080,7 @@ sub readLog {
         return $warning;
     }
 
-    my $user = readFromDB(
+    my $settings = readFromDB(
         table    => 'games',
         column   => 'node_usr',
         field    => 'name',
@@ -1088,7 +1088,7 @@ sub readLog {
         hash_ref => 'false'
     );
 
-    if ( !$user ) {
+    unless ( $settings{$game}{'node_usr'} ) {
         my $warning = '<div class="alert alert-danger" role="alert">';
         $warning .= '!! WARNING !! <a href="/yancy#/games" class="alert-link">';
         $warning .=
@@ -1097,7 +1097,7 @@ sub readLog {
         return $warning;
     }
 
-    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
+    my $ssh = connectSSH( user => $settings{$game}{'node_usr'}, ip => $ip, ssh_master => $args{'ssh_master'} );
 
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
@@ -1119,8 +1119,8 @@ sub readLog {
         $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
         $cmd .= q(sed -n '/^>$/d;);
         $cmd .= $line_count;
-        $cmd .= q(,$p' < ~/);
-        $cmd .= qq($game/game_files/hardcopy.0);
+        $cmd .= q(,$p' < );
+        $cmd .= qq($settings{$game}{'node_path'}/$game/game_files/hardcopy.0);
 
 
     app->log->debug($cmd);
