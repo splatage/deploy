@@ -1,16 +1,16 @@
 
 use v5.28;
 use Mojolicious::Lite -signatures;
-use Net::OpenSSH::Parallel;
+# use Net::OpenSSH::Parallel;
 use Net::OpenSSH;
 use Mojo::mysql;
 use DBD::mysql;
 use DBI;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
-use IO::Socket::SSL;
+#use IO::Socket::SSL;
 use Minion;
-use Carp         qw( croak );
+#use Carp         qw( croak );
 use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
 use Time::Piece;
@@ -805,15 +805,16 @@ websocket '/log/:node/<game>-ws' => sub {
         };
 
         # Now fix wrapped lines for formatting
-        $logdata->{'content'} =~ s/([^\n]{80})\n/$1/g; # Vertial term wraps at 80 characters
+        $logdata->{'content'} =~ s/([^\n]{79})\n/$1/g; # Vertial term wraps at 80 characters
 
         foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
             $content = "<div>" . $_ . "</div>\n" . $content;
         };
-
-        $self->send( $content );
-        #delete $logdata->{'content'};
+        # $logdata->{'content'};
         $line_index = $logdata->{'line_index'};
+        $logdata = {};
+        $self->send( $content );
+
    };
 
     $self->on(json => sub {
@@ -1131,9 +1132,9 @@ sub readLog {
 
         my  $cmd;
             $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
-            $cmd .= q(sed -n '/^>$/d;);
+            $cmd .= q(sed -n ');
             $cmd .= $args{'line_index'};
-            $cmd .= q(,$p' < );
+            $cmd .= q(,${$b;p}' < );
             $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/hardcopy.0);
         app->log->debug($cmd);
 
@@ -1148,7 +1149,7 @@ sub readLog {
 
         my  $cmd;
             $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
-            $cmd .= q(tail -n 32 );
+            $cmd .= q(tail -n 24 );
             $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/screenlog.0);
 
         $logfile =  $ssh->{'link'}->capture($cmd);
