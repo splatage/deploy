@@ -695,7 +695,7 @@ get '/logfile' => sub ($c) {
 
 
 websocket '/logfile-ws' => sub {
-    my $line_count;
+    my $line_index;
     my $self = shift;
     my $file = app->log->path;
     my $results;
@@ -713,7 +713,7 @@ websocket '/logfile-ws' => sub {
     $send_data = sub {
         $results = updatePage(
                     file        => $file,
-                    line_count  => $results->{'line_count'},
+                    line_index  => $results->{'line_index'},
                     ip          => $ip,
                     user        => $user,
                     game        => $game,
@@ -722,7 +722,7 @@ websocket '/logfile-ws' => sub {
         if ( $results->{'new_content'} ) {
             my $content;
             foreach ( split( /\n/, ( $results->{'new_content'} ) ) ) {
-                ++$line_count;
+                ++$line_index;
                 $content = '<div>' . $_ . "</div>\n" . $content;
             }
             $self->send( $content );
@@ -766,10 +766,8 @@ get '/serverlog/:task' => sub ($c) {
 
 
 websocket '/log/:node/<game>-ws' => sub {
-    my $line_count;
-    my $self = shift;
-    my $logdata = {};
 
+    my $self = shift;
 
     my $node = $self->stash('node');
     my $game = $self->stash('game');
@@ -784,28 +782,38 @@ websocket '/log/:node/<game>-ws' => sub {
 
 
     my $send_data;
+    my $line_index;
+    my $logdata = {};
 
     $send_data = sub {
 
         app->log->debug("$$ websocket: polling $game on $node ");
 
+           $logdata     = {};
            $logdata     = readLog(
             node        => $node,
             game        => $game,
-            line_count  => $line_count,
+            line_index  => $line_index,
             ssh_master  => $config->{'ssh_master'}
         );
 
         my $content;
 
+        # Count the new lines so we can index hardcopy.o
         foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
-            ++$line_count;
-            ++$logdata->{'line_count'};
+            ++$logdata->{'line_index'};
+        };
+
+        # Now fix wrapped lines for formatting
+        $logdata->{'content'} =~ s/([^\n]{80})\n/$1/g; # Vertial term wraps at 80 characters
+
+        foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
             $content = "<div>" . $_ . "</div>\n" . $content;
         };
+
         $self->send( $content );
-        $logdata->{'content'} = "";
-        $line_count = $logdata->{'line_count'};
+        #delete $logdata->{'content'};
+        $line_index = $logdata->{'line_index'};
    };
 
     $self->on(json => sub {
@@ -907,7 +915,7 @@ websocket '/notify' => sub ($c) {
 
 sub updatePage_game {
     my %args = (
-       line_count   => '',
+       line_index   => '',
        iteration    => '',
        logdata      => '',
        user         => '',
@@ -924,8 +932,8 @@ sub updatePage_game {
     foreach ( split( /\n/, ( $args{'logdata'} ) ) ) {
         ++$iteration;
 
-        #if ( $iteration > $args{'line_count'} ) {
-            ++$args{'line_count'};
+        #if ( $iteration > $args{'line_index'} ) {
+            ++$args{'line_index'};
             $new_content = $new_content . '<div>' . $_ . "</div>\n";
         #}
     }
@@ -939,7 +947,7 @@ sub updatePage_game {
 
 sub updatePage {
     my %args = (
-       line_count   => '',
+       line_index   => '',
        iteration    => '',
        ip           => '',
        user         => '',
@@ -956,8 +964,8 @@ sub updatePage {
     while (<FILE>) {
         ++$iteration;
 
-        if ( $iteration > $args{'line_count'} ) {
-            ++$args{'line_count'};
+        if ( $iteration > $args{'line_index'} ) {
+            ++$args{'line_index'};
             $new_content = $new_content . "<div>" . $_ . "</div>\n";
         }
     }
@@ -1100,38 +1108,57 @@ sub readLog {
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    $args{'line_count'} = '1' unless ( $args{'line_count'} );
+    $args{'line_index'} = '1' unless ( $args{'line_index'} );
+    app->log->debug("$game log has $args{'line_index'} lines");
+
+    my $method = 'hardcopy';
+    my $logfile;
 
     my $reset = $ssh->{'link'}->capture("screen -ls $game");
 
-    app->log->debug("$game log has $args{'line_count'} lines");
     unless ( $reset =~ /There is a screen/ ) {
-        $args{'line_count'} = 1;
-        app->log->trace("$game screen is offline. $reset");
-       return \%args;
+        $args{'line_index'} = 1;
+        $args{'content'} = '';
+        app->log->warn("$game screen is offline. $reset");
+        $method = 'screenlog';
+       #return \%args;
     }
-    else {
 
-    $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
-    Time::HiRes::sleep( 0.2 );
+    if ( $method eq 'hardcopy' ) {
+        ## Use hardcopy
+        $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
+        Time::HiRes::sleep( 0.2 );
 
-    my  $cmd;
-        $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
-        $cmd .= q(sed -n '/^>$/d;);
-        $cmd .= $args{'line_count'};
-        $cmd .= q(,$p' < );
-        $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/hardcopy.0);
+        my  $cmd;
+            $cmd  = "[ -f ~/$game/game_files/hardcopy.0 ] && ";
+            $cmd .= q(sed -n '/^>$/d;);
+            $cmd .= $args{'line_index'};
+            $cmd .= q(,$p' < );
+            $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/hardcopy.0);
+        app->log->debug($cmd);
 
+           $logfile =  $ssh->{'link'}->capture($cmd);
+    }
 
-    app->log->debug($cmd);
+    if ( $method eq 'screenlog' ) {
+        ## Use screenlog.0
+     my @cmd = qq(screen -S $game -X colon "logfile flush 0^M");
+        $ssh->{'link'}->system(@cmd);
+        Time::HiRes::sleep( 0.5 );
 
-    my $logfile =  $ssh->{'link'}->capture($cmd);
-       $logfile =~ s/([^\n]{80})\n/$1/g; # Vertial term wraps at 80 characters
+        my  $cmd;
+            $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
+            $cmd .= q(tail -n 5 );
+            $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/screenlog.0);
 
-       $args{'content'} = $logfile;
+        $logfile =  $ssh->{'link'}->capture($cmd);
 
-      return \%args;
-      }
+        @cmd = qq(screen -S $game -X colon "logfile flush 5^M");
+        $ssh->{'link'}->system(@cmd);
+    }
+
+   $args{'content'} = $logfile;
+   return \%args;
 }
 
 
@@ -1832,7 +1859,7 @@ sub bootGame {
 
 
     my $invocation;
-       $invocation  = qq( cd $path && screen -h 50000 -L -dmS $game );
+       $invocation  = qq( cd $path && screen -h 10000 -L -dmS $game );
        $invocation .= qq( $settings->{$game}{'java_bin'} );
        $invocation .= qq( -Xms$settings->{$game}{'mem_min'} );
        $invocation .= qq( -Xmx$settings->{$game}{'mem_max'} );
@@ -1849,7 +1876,7 @@ sub bootGame {
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    #$ssh->{'link'}->system("$boot_strap");
+    # Containerize game in screen, append hardcopy on exit to catch final words
     $ssh->{'link'}->system("$invocation");
 
     my @cmd = qq(screen -S $game -X colon "logfile flush 5^M");
@@ -1914,41 +1941,41 @@ sub bootStrap {
     $boot_strap = qq( mkdir -p $path/logs );
        $ssh->{'link'}->system("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $output . "\n" . $task;
+       $output .= $task;
 
     $task       = qq( bootstrap $game: eula.txt );
     $boot_strap = qq( cd $path;  echo "eula=true" > eula.txt );
        $ssh->{'link'}->system("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $output . "\n" . $task;
+       $output .= $task;
 
     $task       = qq( bootstrap $game: log files );
     $boot_strap = qq( touch $path/logs/gc.log );
        $ssh->{'link'}->system("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $output . "\n" . $task;
+       $output .= $task;
 
     $task       = qq( bootstrap $game: spigot.yml );
     $boot_strap = qq( cd $path; [ -f spigot.yml ] && sed -i '/bungeecord:/s/false/true/' spigot.yml );
        $ssh->{'link'}->system("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $output . "\n" . $task;
+       $output .= $task;
 
     $task       = qq( bootstrap $game: paper.yml );
     $boot_strap = qq( cd $path; [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml );
        $ssh->{'link'}->system("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $output . "\n" . $task;
+       $output .= $task;
 
     $task       = qq( bootstrap $game: server properties );
     $boot_strap = qq( cd $path; [ -f server.properties ] && sed -i '/online-mode=/s/true/false/' server.properties );
        $ssh->{'link'}->system("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $output . "\n" . $task;
+       $output .= $task;
 
     $task       = "bootstrap environment prepared";
        app->log->info("$task");
-       $output .= $output . "\n" . $task;
+       $output .= $task;
 
        return $output;
 }
@@ -2066,7 +2093,7 @@ sub infoNode {
     my $df_cmd  = 'df -h $(pwd) 2>&1; printf "\n\n"; df -hT --total';
 #    my $neo_cmd = 'neofetch --stdout 2>&1';
     my @neo_cmd = q(neofetch|sed 's/\x1B\[[0-9?;]*[a-zCAD0-9]//g');
-#    my $du_cmd  = 'echo $(pwd); du -shc * 2>&1 | sort -h';
+    my $java_cmd  = 'find /lib/ /opt/ 2>&1 /dev/null | grep bin/java$';
 
     foreach my $game ( sort keys %{$game_ports} ) {
         next if ( $game_ports->{$game}{'enabled'} eq '0' );
@@ -2095,15 +2122,18 @@ collsns    Number of collisions, which should always be zero on a switched LAN.
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-        $output{'1_cpu'}   = $ssh->{'link'}->capture(@cpu_cmd);
-        $output{'3_mem'}   = $ssh->{'link'}->capture(@mem_cmd);
-        $output{'5_net'}   = $ssh->{'link'}->capture($net_cmd) . $iperf;
-        $output{'2_inet'}  = $ssh->{'link'}->capture($con_cmd);
-        $output{'6_io'}    = $ssh->{'link'}->capture($io_cmd);
-        $output{'7_disk'}  = $ssh->{'link'}->capture($df_cmd);
         $output{'0_neo'}   = $ssh->{'link'}->capture(@neo_cmd);
-        $output{'4_proc'}  = $ssh->{'link'}->capture(@pid_cmd);
-#        $output{'8_files'} = $ssh->{'link'}->capture($du_cmd);
+        $output{'1_java'}  = $ssh->{'link'}->capture($java_cmd);
+
+        $output{'2_inet'}  = $ssh->{'link'}->capture($con_cmd);
+        $output{'4_net'}   = $ssh->{'link'}->capture($net_cmd) . $iperf;
+
+        $output{'5_cpu'}   = $ssh->{'link'}->capture(@cpu_cmd);
+        $output{'6_mem'}   = $ssh->{'link'}->capture(@mem_cmd);
+        $output{'7_proc'}  = $ssh->{'link'}->capture(@pid_cmd);
+
+        $output{'8_io'}    = $ssh->{'link'}->capture($io_cmd);
+        $output{'9_disk'}  = $ssh->{'link'}->capture($df_cmd);
 
     return \%output;
 }
