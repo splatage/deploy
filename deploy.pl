@@ -307,7 +307,7 @@ app->minion->add_task(
 
         $job->app->log->info("$task $game completed");
 
-        unless ($reboot) {
+        unless ( $reboot ) {
             $job->finish( { message => "$task $game completed" } );
         }
         else {
@@ -1148,7 +1148,7 @@ sub readLog {
 
         my  $cmd;
             $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
-            $cmd .= q(tail -n 5 );
+            $cmd .= q(tail -n 32 );
             $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/screenlog.0);
 
         $logfile =  $ssh->{'link'}->capture($cmd);
@@ -1695,7 +1695,7 @@ sub haltGame {
 
     sendCommand( command => "stop^Mend", game => $game, node => $node, ssh_master => $args{'ssh_master'} );
 
-    sleep(30);
+    sleep(20);
 
     unless ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
         app->log->info("Halt $game succeeded");
@@ -1885,11 +1885,11 @@ sub bootGame {
     sleep(10);
 
     if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
-        app->log->info("Started $game");
+        app->log->info("$game boot succeded");
         return 0;
     }
     else {
-        app->log->info("Failed to start $game");
+        app->log->info("$game boot failed");
         return 1;
     }
 }
@@ -1938,40 +1938,35 @@ sub bootStrap {
     my $output;
 
     $task       = qq( bootstrap $game: creating paths );
-    $boot_strap = qq( mkdir -p $path/logs );
-       $ssh->{'link'}->system("$boot_strap");
+    $boot_strap = qq( mkdir -p $path/logs ; echo "$? paths");
+       $output .= $ssh->{'link'}->capture("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $task;
 
     $task       = qq( bootstrap $game: eula.txt );
-    $boot_strap = qq( cd $path;  echo "eula=true" > eula.txt );
-       $ssh->{'link'}->system("$boot_strap");
+    $boot_strap = qq( cd $path;  echo "eula=true" > eula.txt ; echo "$? eula" );
+       $output .= $ssh->{'link'}->capture("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $task;
 
     $task       = qq( bootstrap $game: log files );
-    $boot_strap = qq( touch $path/logs/gc.log );
-       $ssh->{'link'}->system("$boot_strap");
+    $boot_strap = qq( touch $path/logs/gc.log ; echo "$? gc.log" );
+       $output .= $ssh->{'link'}->capture("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $task;
 
     $task       = qq( bootstrap $game: spigot.yml );
-    $boot_strap = qq( cd $path; [ -f spigot.yml ] && sed -i '/bungeecord:/s/false/true/' spigot.yml );
-       $ssh->{'link'}->system("$boot_strap");
+    $boot_strap = qq( cd $path; [ -f spigot.yml ] && sed -i '/bungeecord:/s/false/true/' spigot.yml ; echo "$? spigot.yml" );
+       $output .= $ssh->{'link'}->capture("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $task;
 
     $task       = qq( bootstrap $game: paper.yml );
-    $boot_strap = qq( cd $path; [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml );
-       $ssh->{'link'}->system("$boot_strap");
+    $boot_strap = qq( cd $path; [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml ; echo "$? paper.yml" );
+       $output .= $ssh->{'link'}->capture("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $task;
 
-    $task       = qq( bootstrap $game: server properties );
-    $boot_strap = qq( cd $path; [ -f server.properties ] && sed -i '/online-mode=/s/true/false/' server.properties );
-       $ssh->{'link'}->system("$boot_strap");
+    $task        = qq( bootstrap $game: server properties );
+    $boot_strap  = qq( cd $path; [ -f server.properties ] && );
+    $boot_strap .= qq(sed -i '/online-mode=/s/true/false/' server.properties ; echo "$? server.properties" );
+       $output  .= $ssh->{'link'}->capture("$boot_strap");
        app->log->info("$task success $boot_strap");
-       $output .= $task;
 
     $task       = "bootstrap environment prepared";
        app->log->info("$task");
