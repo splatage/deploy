@@ -133,10 +133,6 @@ plugin Yancy => {
                 type        => 'boolean',
                 default     => 1,
             },
-            group           => {
-                'x-order'   => 6,
-                type        => 'string',
-            },
         },
     },
     roles                   => {
