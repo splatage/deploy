@@ -1,7 +1,6 @@
 
 use v5.28;
 use Mojolicious::Lite -signatures;
-# use Net::OpenSSH::Parallel;
 use Net::OpenSSH;
 use Mojo::mysql;
 use DBD::mysql;
@@ -9,8 +8,9 @@ use DBI;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
 #use IO::Socket::SSL;
+use Digest::Bcrypt;
+use Data::Entropy::Algorithms qw(rand_bits);
 use Minion;
-#use Carp         qw( croak );
 use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
 use Time::Piece;
@@ -107,28 +107,34 @@ plugin Yancy => {
         isOnline                => { 'x-ignore' => 'true' },
         users                   => {
             'x-id-field'        => 'username',
-            required            => [ 'username' ],
+            required            => [ 'username', 'email' ],
             properties          => {
                 username        => {
+                    'x-order'   => 1,
                     type        => 'string',
                 },
                 email           => {
+                    'x-order'   => 2,
                     type        => 'string',
                     format      => 'email',
                 },
                 password        => {
+                    'x-order'   => 3,
                     type        => 'string',
                     format      => 'password',
                 },
                 is_admin        => {
+                    'x-order'   => 4,
                     type        => 'boolean',
                     default     => 0,
                 },
                 enabled         => {
+                    'x-order'   => 5,
                     type        => 'boolean',
                     default     => 1,
                 },
                 group           => {
+                    'x-order'   => 6,
                     type        => 'string',
                 },
             },
@@ -176,16 +182,23 @@ foreach my $game (keys %{$game_settings}) {
 ###########################################################
 
 app->sessions->default_expiration( 1 * 60 * 60 );
+my $salt = '';
+for my $i (0..15) {
+    $salt .= chr(rand(87) + 35);
+}
 
 app->yancy->plugin(
     'Auth::Password' => {
         schema          => 'users',
         allow_register  => $config->{'allow_registration'},
         username_field  => 'username',
-        email_filed     => 'email',
+        email_field     => 'email',
         password_field  => 'password',
         password_digest => {
-            type => 'SHA-512'
+           #type => 'SHA-512'
+            type => 'Bcrypt',
+            cost => 12,
+            salt => $salt,
         }
     }
 );
@@ -243,7 +256,7 @@ under sub ($c) {
     # Security log authentication attempts
     my $ip = $c->remote_addr;
 
-    app->log->warn("authentication attempt from $ip");
+    app->log->warn("AUTH attempt from $ip");
     $c->flash( error => "your ip $ip is logged" );
     $c->render( template => 'login' );
 
@@ -910,7 +923,7 @@ websocket '/log/:node/<game>-ws' => sub {
          my ($c, $hash) = @_;
          
          # Strip out any command characters
-         $hash->{cmd} =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;s/\r//g;s/\007//g;
+         $hash->{cmd} =~ s/[\^\\]//g;
 
          sendCommand(   command     => $hash->{cmd},
                         game        => $game,
@@ -2661,7 +2674,7 @@ window.setTimeout(function() {
 <html>
 
 <div class="alert alert-success alert-dismissible fade show" role="alert">
-  <h4 class="alert-heading">online nodes</h4>
+  <h4 class="alert-heading">network overview</h4>
   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 
