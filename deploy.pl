@@ -96,55 +96,79 @@ plugin Yancy => {
             'x-list-columns' =>
             [qw( name node group release port mem_max store enabled isBungee )],
         },
-        nodes => {
-            'x-list-clomuns' => [qw( name ip enabled isGateway )],
-        },
-        gs_plugin_settings      => { 'x-hidden' => 'true' },
-        global_settings         => { 'x-hidden' => 'true' },
-        minion_jobs_depends     => { 'x-ignore' => 'true' },
-        minion_workers_inbox    => { 'x-ignore' => 'true' },
-        mojo_pubsub_subscribe   => { 'x-ignore' => 'true' },
-        isOnline                => { 'x-ignore' => 'true' },
-        users                   => {
-            'x-id-field'        => 'username',
-            required            => [ 'username', 'email' ],
-            properties          => {
-                username        => {
-                    'x-order'   => 1,
-                    type        => 'string',
-                },
-                email           => {
-                    'x-order'   => 2,
-                    type        => 'string',
-                    format      => 'email',
-                },
-                password        => {
-                    'x-order'   => 3,
-                    type        => 'string',
-                    format      => 'password',
-                },
-                is_admin        => {
-                    'x-order'   => 4,
-                    type        => 'boolean',
-                    default     => 0,
-                },
-                enabled         => {
-                    'x-order'   => 5,
-                    type        => 'boolean',
-                    default     => 1,
-                },
-                group           => {
-                    'x-order'   => 6,
-                    type        => 'string',
-                },
+    nodes => {
+        'x-list-clomuns' => [qw( name ip enabled isGateway )],
+    },
+    gs_plugin_settings      => { 'x-hidden' => 'true' },
+    global_settings         => { 'x-hidden' => 'true' },
+    minion_jobs_depends     => { 'x-ignore' => 'true' },
+    minion_workers_inbox    => { 'x-ignore' => 'true' },
+    mojo_pubsub_subscribe   => { 'x-ignore' => 'true' },
+    isOnline                => { 'x-ignore' => 'true' },
+    users                   => {
+        'x-id-field'        => 'username',
+        required            => [ 'username', 'email' ],
+        properties          => {
+            username        => {
+                'x-order'   => 1,
+                type        => 'string',
+            },
+            email           => {
+                'x-order'   => 2,
+                type        => 'string',
+                format      => 'email',
+            },
+            password        => {
+                'x-order'   => 3,
+                type        => 'string',
+                format      => 'password',
+            },
+            super_user      => {
+                'x-order'   => 4,
+                type        => 'boolean',
+                default     => 0,
+            },
+            enabled         => {
+                'x-order'   => 5,
+                type        => 'boolean',
+                default     => 1,
+            },
+            group           => {
+                'x-order'   => 6,
+                type        => 'string',
             },
         },
-        roles                   => {
-            'x-id-field'        => 'role',
+    },
+    roles                   => {
+        'x-id-field'        => 'role',
+    },
+    perms                   => {
+        'x-id-field'        => 'username',
+        required            => [ 'username' ],
+        properties          => {
+            username        => {
+                'x-order'   => 1,
+                type        => 'string',
+            },
+            group           => {
+                'x-order'   => 2,
+                type        => 'string',
+            },
+            admin           => {
+                'x-order'   => 3,
+                type        => 'boolean',
+                default     => 0,
+            },
+            enabled         => {
+                'x-order'   => 4,
+                type        => 'boolean',
+                default     => 1,
+            },
         },
     },
+    },
     editor => {
-        require_user => { is_admin => 1 },
+        require_user => { super_user => 1 },
     },
 };
 
@@ -163,6 +187,12 @@ my $game_settings = readFromDB(
 
 my $user_settings = readFromDB(
         table    => 'users',
+        column   => 'username',
+        hash_ref => 'true'
+    );
+
+my $perms = readFromDB(
+        table    => 'perms',
         column   => 'username',
         hash_ref => 'true'
     );
@@ -274,9 +304,9 @@ get '/update/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -315,9 +345,9 @@ get '/bootstrap/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -381,9 +411,9 @@ get '/boot/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -433,9 +463,9 @@ get '/halt/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -476,9 +506,9 @@ get '/deploy/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -517,9 +547,9 @@ get '/store/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -560,9 +590,9 @@ get '/link/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -600,9 +630,9 @@ get '/drop/:game/:node' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -659,9 +689,9 @@ get '/info/:node/' => sub ($c) {
 
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    unless ( $is_admin ) {
+    unless ( $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that " );
         app->log->warn("IDS: $username from $ip requested $template $node ");
         $c->redirect_to($c->req->headers->referrer);
@@ -726,9 +756,9 @@ get '/files/:game'  => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    unless ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    unless ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested $template $game ");
         $c->redirect_to($c->req->headers->referrer);
@@ -744,9 +774,9 @@ get '/reload' => sub ($c) {
 
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    unless ( $is_admin ) {
+    unless ( $is_admin eq '1') {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested a reload ");
 
@@ -767,9 +797,9 @@ get '/logfile' => sub ($c) {
     my $template    = 'logfile';
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    unless ( $is_admin ) {
+    unless ( $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested $template ");
         $c->redirect_to($c->req->headers->referrer);
@@ -783,7 +813,11 @@ get '/logfile' => sub ($c) {
 websocket '/logfile-ws' => sub {
 
     my $self = shift;
-    return unless $self->yancy->auth->current_user->{'is_admin'};
+
+    my $username    = $self->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
+
+    return unless $is_admin;
 
     my $line_index;
 
@@ -834,9 +868,9 @@ get '/serverlog/:task' => sub ($c) {
     my $task        = $c->stash->{'task'};
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    unless ( $is_admin ) {
+    unless ( $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested serverlog $task");
 
@@ -870,11 +904,11 @@ websocket '/log/:node/<game>-ws' => sub {
     my $self = shift;
     my $ip          = $self->remote_addr;
     my $username    = $self->yancy->auth->current_user->{'username'};
-    my $is_admin    = $self->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
     my $node        = $self->stash('node');
     my $game        = $self->stash('game');
 
-    return unless ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' );
+    return unless ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' );
 
     my $loop;
 
@@ -921,7 +955,7 @@ websocket '/log/:node/<game>-ws' => sub {
 
     $self->on(json => sub {
          my ($c, $hash) = @_;
-         
+
          # Strip out any command characters
          $hash->{cmd} =~ s/[\^\\]//g;
 
@@ -955,9 +989,9 @@ get '/log/:node/:game' => sub ($c) {
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $c->yancy->auth->current_user->{'is_admin'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
-    unless ( $game_settings->{$game}{'group'} eq $user_settings->{$username}{'group'} || $is_admin eq '1' ) {
+    unless ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested $template $game ");
         $c->redirect_to($c->req->headers->referrer);
