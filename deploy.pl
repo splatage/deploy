@@ -784,16 +784,17 @@ websocket '/log/:node/<game>-ws' => sub {
     my $send_data;
     my $line_index;
     my $logdata = {};
+    my $screenlog;
 
     $send_data = sub {
 
         app->log->debug("$$ websocket: polling $game on $node ");
 
-           $logdata     = {};
            $logdata     = readLog(
             node        => $node,
             game        => $game,
             line_index  => $line_index,
+            screenlog   => $screenlog,
             ssh_master  => $config->{'ssh_master'}
         );
 
@@ -806,13 +807,14 @@ websocket '/log/:node/<game>-ws' => sub {
 
         # Now fix wrapped lines for formatting
         $logdata->{'content'} =~ s/([^\n]{79})\n/$1/g; # Vertial term wraps at 80 characters
+        $logdata->{'content'} =~ s/([^\n]{60})(\[[0-9:]{8})/$1\n$2/g;
 
         foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
             $content = "<div>" . $_ . "</div>\n" . $content;
         };
-        # $logdata->{'content'};
+        $logdata->{'content'} = '';
+        $screenlog = $logdata->{'screenlog'};
         $line_index = $logdata->{'line_index'};
-        $logdata = {};
         $self->send( $content );
 
    };
@@ -1127,6 +1129,8 @@ sub readLog {
 
     if ( $method eq 'hardcopy' ) {
         ## Use hardcopy
+
+        $args{'screenlog'} = '';
         $ssh->{'link'}->system("screen -p 0 -S $game -X hardcopy -h");
         Time::HiRes::sleep( 0.2 );
 
@@ -1143,16 +1147,29 @@ sub readLog {
 
     if ( $method eq 'screenlog' ) {
         ## Use screenlog.0
+
+     return \%args if ( $args{'screenlog'} eq 'true' );
+     $args{'screenlog'} = 'true';
+
      my @cmd = qq(screen -S $game -X colon "logfile flush 0^M");
         $ssh->{'link'}->system(@cmd);
         Time::HiRes::sleep( 0.5 );
 
         my  $cmd;
             $cmd  = "[ -f ~/$game/game_files/screenlog.0 ] && ";
-            $cmd .= q(tail -n 24 );
+            $cmd .= q(tail -n 128 );
             $cmd .= qq($settings->{$game}{'node_path'}/$game/game_files/screenlog.0);
 
-        $logfile =  $ssh->{'link'}->capture($cmd);
+        $logfile .= '#' x 80;
+        $logfile .= qq(\n\n## $game is offline, viewing previous log ##\n\n);
+        $logfile .= 'v' x 40 . "\n\n";
+
+        $logfile .=  $ssh->{'link'}->capture($cmd);
+        $logfile =~ s/\x1b[[()=][;?0-9]*[0-9A-Za-z]?//g;s/\r//g;s/\007//g;
+
+        $logfile .= '^' x 40;
+        $logfile .= qq(\n\n## $game is offline, viewing previous log ##\n\n);
+        $logfile .= '#' x 80;
 
         @cmd = qq(screen -S $game -X colon "logfile flush 5^M");
         $ssh->{'link'}->system(@cmd);
@@ -2174,12 +2191,13 @@ body  {
 .data a, .data span, .data tr, .data td { white-space: pre; }
 
 #command-content{
-    text-indent: -20px;
-    padding-left: 25px; font-size: small; color: #41FF00;
-    height: 65vh;
+    text-indent:  -20px;
+    padding-left: 26px; font-size: small; color: #41FF00;
+    height: 70vh;
     overflow: auto;
     display: flex;
     flex-direction: column-reverse;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
     background-color: black;
 }
 
