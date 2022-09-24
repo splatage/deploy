@@ -95,9 +95,10 @@ plugin Yancy => {
             # Show these columns in the Yancy editor
             'x-list-columns' =>
             [qw( name node group release port mem_max store enabled isBungee )],
+            required        => [ 'name', 'group' ],
         },
     nodes => {
-        'x-list-clomuns' => [qw( name ip enabled isGateway )],
+        'x-list-clomuns'    => [qw( name ip enabled isGateway )],
     },
     gs_plugin_settings      => { 'x-hidden' => 'true' },
     global_settings         => { 'x-hidden' => 'true' },
@@ -134,9 +135,6 @@ plugin Yancy => {
                 default     => 1,
             },
         },
-    },
-    roles                   => {
-        'x-id-field'        => 'role',
     },
     perms                   => {
         'x-id-field'        => 'username',
@@ -210,7 +208,7 @@ foreach my $game (keys %{$game_settings}) {
 app->sessions->default_expiration( 1 * 60 * 60 );
 my $salt = '';
 for my $i (0..15) {
-    $salt .= chr(rand(87) + 35);
+    $salt .= chr(rand(74) + 48);
 }
 
 app->yancy->plugin(
@@ -229,28 +227,25 @@ app->yancy->plugin(
     }
 );
 
-#app->yancy->plugin( Roles => {
-#    schema => 'roles',
-#    userid_field => 'username',
-#    role_field   => 'role'
-#    }
-#);
-
 group {
     my $route = under '/minion' => sub ($c) {
-        my $name = $c->yancy->auth->current_user->{'is_admin'} || '';
+        my $name = $c->yancy->auth->current_user->{'super_user'} || '';
         if ( $name ne '' ) {
             return 1;
         }
+
         $name = $c->yancy->auth->current_user || '';
         if ( $name ne '' ) {
             my $ip          = $c->remote_addr;
             my $username    = $c->yancy->auth->current_user->{'username'};
+            my $is_admin    = $perms->{$username}{'admin'};
+
+            return 1 if ( $is_admin eq '1' );
 
             $c->res->headers->www_authenticate('Basic');
             $c->flash( error => "you dont have permission to do that " );
             app->log->warn("IDS: $username from $ip requested minions ");
-            $c->redirect_to($c->req->headers->referrer);
+            $c->redirect_to('/');
         };
 
         $c->redirect_to("/login");
@@ -669,10 +664,16 @@ get '/' => sub ($c) {
         game    => '',
         ssh_master => $config->{'ssh_master'},
     );
+    my $ip          = $c->remote_addr;
+    my $username    = $c->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
     $c->stash(
         nodes    => $results,
-        expected => $game_settings
+        perms    => $perms,
+        expected => $game_settings,
+        is_admin => $is_admin,
+        username => $username,
     );
 
     $c->render( template => 'index' );
@@ -694,7 +695,12 @@ get '/info/:node/' => sub ($c) {
     };
 
     my $results     = infoNode( node => $node, ssh_master => $config->{'ssh_master'} );
-    $c->stash( results   => $results );
+
+    $c->stash(
+        results     => $results,
+        is_admin    => $is_admin,
+        username    => $username
+    );
     $c->render( template => $template );
 };
 
@@ -712,6 +718,9 @@ get '/node/:node' => sub ($c) {
         $c->flash(error => "$node doesn't exist");
         $c->redirect_to("/");
     };
+
+    my $username    = $c->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
 
     my $ip = readFromDB(
         table       => 'nodes',
@@ -741,7 +750,10 @@ get '/node/:node' => sub ($c) {
         template    => 'node',
         nodes       => $results,
         history     => $jobs,
-        expected    => $expected
+        expected    => $expected,
+        perms       => $perms,
+        is_admin    => $is_admin,
+        username    => $username,
     );
 };
 
@@ -760,8 +772,12 @@ get '/files/:game'  => sub ($c) {
         $c->redirect_to($c->req->headers->referrer);
     };
 
-    my @results          = getFiles( game => $game );
-    $c->stash( files     => @results );
+    my @results     = getFiles( game => $game );
+    $c->stash(
+        files       => @results,
+        is_admin    => $is_admin,
+        username    => $username
+     );
     $c->render( template => $template );
 };
 
@@ -776,7 +792,7 @@ get '/reload' => sub ($c) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested a reload ");
 
-        $c->redirect_to($c->req->headers->referrer);
+        $c->redirect_to('/');
     };
 
     my $ppid = getppid();
@@ -801,8 +817,13 @@ get '/logfile' => sub ($c) {
         $c->redirect_to($c->req->headers->referrer);
     };
 
+    $c->stash(
+        username    => $username,
+        is_admin    => $is_admin
+    );
+
     app->log->debug("retrieving logfile");
-    $c->render( template => $template );
+    $c->render( template => $template, perms => $perms );
 };
 
 
@@ -996,9 +1017,10 @@ get '/log/:node/:game' => sub ($c) {
     app->log->debug("reading $game logfile");
 
     $c->stash(
-        node    => $node,
-        game    => $game,
-
+        node        => $node,
+        game        => $game,
+        is_admin    => $is_admin,
+        username    => $username
     );
 
     $c->render(
@@ -2020,6 +2042,7 @@ sub bootGame {
        $boot_strap .= qq( [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml && );
        $boot_strap .= qq( [ -f server.properties ] && sed -i '/online-mode=/s/true/false' server.properties  );
 
+    $settings->{$game}{'java_flags'} =~ s/^'//; s/'$//;
 
     my $invocation;
        $invocation  = qq( cd $path && screen -h 10000 -L -dmS $game );
@@ -2412,21 +2435,27 @@ html {
      <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
   </a>
 
-
+ % if ( $c->yancy->auth->current_user ) {
+     <h6> <%= $c->yancy->auth->current_user->{'username'} %> </h6>
+% }
    <div class="container" id="navbarNav">
       <ul class="navbar-nav me-auto mb-2 mb-sm-0 nav-tabs">
       % if ( $c->yancy->auth->current_user ) {
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/"><h6>home</h6></a>
         </li>
+        % if ( $c->yancy->auth->current_user->{'super_user'} ) {
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/yancy"><h6>settings</h6></a>
         </li>
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/minion"><h6>minions</h6></a>
-        </li>
+        % }
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/status"><h6>status</h6></a>
+        </li>
+
+        %# if ( $admin ) {
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/minion"><h6>minions</h6></a>
         </li>
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/logfile"><h6>logfile</h6></a>
@@ -2434,6 +2463,7 @@ html {
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/reload"><h6>reload</h6></a>
         </li>
+        %# }
         <li class="nav-item">
           <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>logout</h6></a>
         </li>
