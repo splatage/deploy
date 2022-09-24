@@ -229,12 +229,7 @@ app->yancy->plugin(
 
 group {
     my $route = under '/minion' => sub ($c) {
-        my $name = $c->yancy->auth->current_user->{'super_user'} || '';
-        if ( $name ne '' ) {
-            return 1;
-        }
-
-        $name = $c->yancy->auth->current_user || '';
+       my $name = $c->yancy->auth->current_user || '';
         if ( $name ne '' ) {
             my $ip          = $c->remote_addr;
             my $username    = $c->yancy->auth->current_user->{'username'};
@@ -279,6 +274,11 @@ under sub ($c) {
 
     app->log->warn("AUTH attempt from $ip");
     $c->flash( error => "your ip $ip is logged" );
+
+    $c->stash(
+        is_admin => '',
+        username => '' );
+
     $c->render( template => 'login' );
 
     return;
@@ -799,8 +799,8 @@ get '/reload' => sub ($c) {
     kill 'USR2' => $ppid;
     sleep(1);
     $c->flash(message => "reload signal sent to $ppid");
-
-    $c->redirect_to($c->req->headers->referrer);
+    $c->redirect_to('/');
+    #$c->redirect_to($c->req->headers->referrer);
 };
 
 
@@ -2325,15 +2325,15 @@ __DATA__
 
 
 @@ layouts/template.html.ep
-<!DOCTYPE html>
-<html>
-<head>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/css/bootstrap.min.css"
         rel="stylesheet"
         integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT"
         crossorigin="anonymous">
-
-    <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
 body  {
@@ -2435,41 +2435,41 @@ html {
      <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
   </a>
 
- % if ( $c->yancy->auth->current_user ) {
-     <h6> <%= $c->yancy->auth->current_user->{'username'} %> </h6>
-% }
    <div class="container" id="navbarNav">
       <ul class="navbar-nav me-auto mb-2 mb-sm-0 nav-tabs">
-      % if ( $c->yancy->auth->current_user ) {
+      % if ( $username ) {
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="#"><h6><%= $username %></h6></a>
+        </li>
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/"><h6>home</h6></a>
         </li>
+
         % if ( $c->yancy->auth->current_user->{'super_user'} ) {
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/yancy"><h6>settings</h6></a>
         </li>
         % }
+        % if ( $is_admin ) {
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/minion"><h6>minions</h6></a>
+        </li>
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/logfile"><h6>logfile</h6></a>
+        </li>
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/reload"><h6>reload</h6></a>
+        </li>
+        % }
         <li class="nav-item">
           <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/status"><h6>status</h6></a>
         </li>
-
-        %# if ( $admin ) {
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/minion"><h6>minions</h6></a>
-        </li>
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/logfile"><h6>logfile</h6></a>
-        </li>
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/reload"><h6>reload</h6></a>
-        </li>
-        %# }
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/yancy/auth/password/logout"><h6>logout</h6></a>
-        </li>
-     <li class="nav-item">
           <a class="btn-sm btn-outline-warning nav-link" role="button" target="_blank"
           href="https://github.com/splatage/deploy/wiki"><h6>help</h6></a>
+        </li>
+        <li class="nav-item">
+          <a class="btn-sm btn-outline-danger nav-link" role="button" href="/yancy/auth/password/logout"><h6>logout</h6></a>
         </li>
      % }
     </ul>
@@ -2504,12 +2504,11 @@ html {
 
 <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"
     integrity="sha384-oBqDVmMz9ATKxIep9tiCxS/Z9fNfEXiDAYTujMAeBAsjFuCZSmKbSSUnQlmh/jp3"
-    crossorigin="anonymous">
-</script>
+    crossorigin="anonymous"></script>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/js/bootstrap.min.js"
     integrity="sha384-7VPbUDkoPSGFnVtYi0QogXtr74QeVeeIs99Qfg5YCF+TidwNdjvaKZX19NZ/e6oz"
-    crossorigin="anonymous">
-</script>
+    crossorigin="anonymous"></script>
 
 <!--  dismiss spinner once page has loaded -->
 <script type="text/javascript">
@@ -3231,3 +3230,4 @@ $(document).ready ( function () {
     <td><ul id="fileList"></ul></td>
   </tr>
 </table>
+
