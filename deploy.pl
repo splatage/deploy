@@ -229,6 +229,7 @@ app->yancy->plugin(
 
 group {
     my $route = under '/minion' => sub ($c) {
+
        my $name = $c->yancy->auth->current_user || '';
         if ( $name ne '' ) {
             my $ip          = $c->remote_addr;
@@ -659,20 +660,21 @@ app->minion->add_task(
 
 get '/' => sub ($c) {
 
-    my $results = checkIsOnline(
+    my $network = checkIsOnline(
         list_by => 'node',
         node    => '',
         game    => '',
         ssh_master => $config->{'ssh_master'},
     );
+
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
-    my $pool       = $perms->{$username}{'pool'};
+    my $pool        = $perms->{$username}{'pool'};
 
     $c->stash(
         title    => 'network overview',
-        nodes    => $results,
+        network  => $network,
         perms    => $perms,
         expected => $game_settings,
         is_admin => $is_admin,
@@ -681,6 +683,7 @@ get '/' => sub ($c) {
         list     => ''
     );
 
+    #$c->render( json => $network );
     $c->render( template => 'index' );
 };
 
@@ -688,33 +691,11 @@ get '/pool' => sub ($c) {
 
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
-    my $pool       = $perms->{$username}{'pool'};
+    my $pool        = $perms->{$username}{'pool'};
 
-    my $results     = checkIsOnline(
-        list_by     => 'game',
+    my $network     = checkIsOnline(
+        list_by     => 'node',
         ssh_master  => $config->{'ssh_master'}
-    );
-
-    app->log->warn(Dumper($results));
-
-    my $expected    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'pool',
-        value       => $pool,
-        hash_ref    => 'true'
-    );
-
-    foreach my $game ( sort keys %{$expected} ) {
-        $expected->{$game} = $results->{$game}{$game};
-      };
-
-    my $expected    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'pool',
-        value       => $pool,
-        hash_ref    => 'true'
     );
 
     my $jobs = app->minion->jobs(
@@ -726,9 +707,8 @@ get '/pool' => sub ($c) {
     );
 
     $c->stash(
-        games       => $results,
+        network     => $network,
         history     => $jobs,
-        expected    => $expected,
         perms       => $perms,
         is_admin    => $is_admin,
         username    => $username,
@@ -749,7 +729,7 @@ get '/info/:node/' => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
-    my $pool       = $perms->{$username}{'pool'};
+    my $pool        = $perms->{$username}{'pool'};
 
     unless ( $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that " );
@@ -771,21 +751,22 @@ get '/info/:node/' => sub ($c) {
 get '/node/:node' => sub ($c) {
 
     my $node        = $c->stash('node');
-    my $results     = checkIsOnline(
+
+    my $network     = checkIsOnline(
         list_by     => 'node',
         node        => $node,
         game        => '',
         ssh_master  => $config->{'ssh_master'}
     );
 
-    if ( $results->{$node}{'offline'} ) {
+    if ( $network->{'nodes'}{$node}{'status'} ne 'online' ) {
         $c->flash(error => "$node doesn't exist");
         $c->redirect_to("/");
     };
 
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
-    my $pool       = $perms->{$username}{'pool'};
+    my $pool        = $perms->{$username}{'pool'};
 
     my $ip = readFromDB(
         table       => 'nodes',
@@ -813,7 +794,7 @@ get '/node/:node' => sub ($c) {
 
     $c->render(
         template    => 'node',
-        nodes       => $results,
+        network     => $network,
         history     => $jobs,
         expected    => $expected,
         perms       => $perms,
@@ -1227,7 +1208,7 @@ sub update {
         ip      => '',
         project => '',
         release => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my ( $project, $release, $version );
@@ -1307,7 +1288,7 @@ sub readLog {
     my %args        = (
         game        => '',
         node        => '',
-        @_,    # argument pair list goes here
+        @_,
     );
     my $game = $args{'game'} or return 1;
     my $node = $args{'node'} or return 1;
@@ -1502,32 +1483,33 @@ sub readFromDB {
 sub checkIsOnline {
 
     my %args = (
-        game    => '',
-        node    => '',
-        pid     => '',
-        user    => $config->{'default_user'},
-        list_by => 'game',
-        ssh_master => '',
-        @_,    # argument pair list goes here
+        game            => '',
+        node            => '',
+        pid             => '',
+        user            => $config->{'default_user'},
+        list_by         => 'game',
+        ssh_master      => '',
+        @_,
     );
 
-    my $enabledNodes = readFromDB(
-        table    => 'nodes',
-        column   => 'name',
-        hash_ref => 'true'
+    my $network = {};
+
+    $network->{'nodes'} = readFromDB(
+        table           => 'nodes',
+        column          => 'name',
+        hash_ref        => 'true'
     );
 
-    return 0 unless $enabledNodes;
+    $network->{'games'} = readFromDB(
+        table           => 'games',
+        column          => 'name',
+        hash_ref        => 'true'
+    );
 
-    my %enabledNodes = %$enabledNodes;
-    my @live_nodes;
-    my @dead_nodes;
+
     my @nodes_to_check;
+    my @live_nodes;
     my $temp_hash   = {};
-    my %temp_hash   = %$temp_hash;
-    my $return_hash = {};
-    my %return_hash = %$return_hash;
-    my $list_by     = $args{'list_by'};
     my $user        = $args{'user'};
 
     if ( $args{'node'} ) {
@@ -1535,113 +1517,99 @@ sub checkIsOnline {
         app->log->debug("Using specified node");
     }
     else {
-        @nodes_to_check = ( sort keys %{$enabledNodes} );
+        @nodes_to_check = ( sort keys %{$network->{'nodes'}} );
         app->log->debug("Using nodes from DB");
     }
 
     app->log->debug("Query: \[@nodes_to_check\]");
 
-
     foreach my $this_node (@nodes_to_check) {
 
-        $return_hash{$this_node}{'offline'}{'offline'} = 'offline';
+        $network->{'nodes'}{$this_node}{'status'} = 'offline';
         app->log->debug("Query $this_node for games...");
 
-        my $ip = $enabledNodes->{$this_node}{'ip'};
+        my $ip = $network->{'nodes'}{$this_node}{'ip'};
 
         my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
         if ( not $ssh->{'link'} or $ssh->{'error'}) {
-            app->log->debug("Query $this_node for games: LINK FAILED $ssh->{'error'}");
+            app->log->warn("Query $this_node for games: LINK FAILED $ssh->{'error'}");
             next;
         }
 
-        delete $return_hash{$this_node}{'offline'};
+        $network->{'nodes'}{$this_node}{'status'} = 'online';
+        $network->{'nodes'}{$this_node}{'ip'}     = $ip;
 
-        my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
-        my $screen_list = $ssh->{'link'}->capture("@cmd");
+        #my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
+        my @cmd = q( ps --no-headers axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd );
+        my $screen_list = $ssh->{'link'}->capture(@cmd);
 
         my @screen_list = split( '\n', $screen_list );
 
+        # Extract and colate key information - index on node and pip
         foreach my $this_game (@screen_list) {
             my @column = split( / +/, $this_game );
 
-            if ( $column[2] eq '1' ) {
+                if ( $this_game =~ /SCREEN.*server/ or $this_game =~ /java.*server/ ) {
 
-                # SCREEN has ppid of 1. Load the PID and game
-                $temp_hash{ $column[1] . $this_node }{'node'} = $this_node;
-                $temp_hash{ $column[1] . $this_node }{'ip'}   = $ip;
-                $temp_hash{ $column[1] . $this_node }{'user'} = $column[0];
-                $temp_hash{ $column[1] . $this_node }{'game'} = $column[12];
+                if ( $column[2] eq '1' ) {
+                    # SCREEN has ppid of 1. Load the PID and game
+                    $temp_hash->{ $column[1] . $this_node }{'node'} = $this_node;
+                    $temp_hash->{ $column[1] . $this_node }{'ip'}   = $ip;
+                    $temp_hash->{ $column[1] . $this_node }{'user'} = $column[0];
+                    $temp_hash->{ $column[1] . $this_node }{'game'} = $column[12];
+                }
+
+                if ( $column[2] ne '1' ) {
+                    # Match java child ppid to SCREEN pid to reference correct hash
+                    $temp_hash->{ $column[2] . $this_node }{'pid'}  = $column[1];
+                    $temp_hash->{ $column[2] . $this_node }{'ppid'} = $column[2];
+                    $temp_hash->{ $column[2] . $this_node }{'pcpu'} = $column[3];
+                    $temp_hash->{ $column[2] . $this_node }{'pmem'} = $column[4];
+                    $temp_hash->{ $column[2] . $this_node }{'vsz'}  = $column[5];
+                    $temp_hash->{ $column[2] . $this_node }{'rss'}  = $column[6];
+                }
             }
+            $network->{'nodes'}{$this_node}{'rss'}     += $column[6];
+            $network->{'nodes'}{$this_node}{'pcpu'}    += $column[3];
 
-            if ( $column[2] ne '1' ) {
-
-                # Match java child ppid to SCREEN pid to reference correct hash
-                $temp_hash{ $column[2] . $this_node }{'pid'}  = $column[1];
-                $temp_hash{ $column[2] . $this_node }{'ppid'} = $column[2];
-                $temp_hash{ $column[2] . $this_node }{'pcpu'} = $column[3];
-                $temp_hash{ $column[2] . $this_node }{'pmem'} = $column[4];
-                $temp_hash{ $column[2] . $this_node }{'vsz'}  = $column[5];
-                $temp_hash{ $column[2] . $this_node }{'rss'}  = $column[6];
-            }
         }
     }
 
     ## Remap temp_hash into return_hash based on $list_by arg
     #  Using list_by|game pair to avoind duplicates
-    foreach my $result ( keys %temp_hash ) {
-        my $list_by = $temp_hash{$result}{ $args{'list_by'} };
+    foreach my $result ( keys %$temp_hash ) {
+        my $list_by = $temp_hash->{$result}{ $args{'list_by'} };
 
-        my $game = $temp_hash{$result}{'game'};
+        my $game = $temp_hash->{$result}{'game'};
 
         app->log->warn("[!!] $game is running multiple times!")
-          if ( $return_hash->{$list_by}{$game} );
+          if ( $network->{'games'}{$game} );
 
-        $return_hash{$list_by}{$game}{'node'} = $temp_hash{$result}{'node'};
-        $return_hash{$list_by}{$game}{'user'} = $temp_hash{$result}{'user'};
-        $return_hash{$list_by}{$game}{'game'} = $temp_hash{$result}{'game'};
-        $return_hash{$list_by}{$game}{'pid'}  = $temp_hash{$result}{'pid'};
-        $return_hash{$list_by}{$game}{'ppid'} = $temp_hash{$result}{'ppid'};
-        $return_hash{$list_by}{$game}{'pcpu'} = $temp_hash{$result}{'pcpu'};
-        $return_hash{$list_by}{$game}{'pmem'} = $temp_hash{$result}{'pmem'};
-        $return_hash{$list_by}{$game}{'vsz'}  = $temp_hash{$result}{'vsz'};
-        $return_hash{$list_by}{$game}{'rss'}  = $temp_hash{$result}{'rss'};
-        $return_hash{$list_by}{$game}{'ip'}   = $temp_hash{$result}{'ip'};
-    }
-
-#     my $t_shoot = Dumper(%return_hash);
-#     app->log->debug($t_shoot);
-
-    ## Load the offline nodes
-    foreach my $offline (@dead_nodes) {
-        $return_hash{$offline}{'offline'}{'offline'} = 'true';
+        $network->{'games'}{$game}{'node'} = $temp_hash->{$result}{'node'};
+        $network->{'games'}{$game}{'user'} = $temp_hash->{$result}{'user'};
+        $network->{'games'}{$game}{'game'} = $temp_hash->{$result}{'game'};
+        $network->{'games'}{$game}{'pid'}  = $temp_hash->{$result}{'pid'};
+        $network->{'games'}{$game}{'ppid'} = $temp_hash->{$result}{'ppid'};
+        $network->{'games'}{$game}{'pcpu'} = $temp_hash->{$result}{'pcpu'};
+        $network->{'games'}{$game}{'pmem'} = $temp_hash->{$result}{'pmem'};
+        $network->{'games'}{$game}{'vsz'}  = $temp_hash->{$result}{'vsz'};
+        $network->{'games'}{$game}{'rss'}  = $temp_hash->{$result}{'rss'};
+        $network->{'games'}{$game}{'ip'}   = $temp_hash->{$result}{'ip'};
     }
 
     if ( $args{'game'} ) {
-
-        if ( $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} ) {
-            app->log->debug( "Found " . $args{'game'} . " on "
-                . $return_hash{ $args{'game'} }{ $args{'game'} }{'node'} . " "
-                . $return_hash{ $args{'game'} }{ $args{'game'} }{'ip'}
-            );
-
-            return "$return_hash{ $args{'game'} }{ $args{'game'} }{'node'}";
-        }
-
-        else {
-            app->log->debug( "$args{'game'} not found on $return_hash{ $args{'game'} }{ $args{'game'} }{'node'}");
-            return 0;
-        }
+        return $network->{'games'}{$args{'game'}}{'node'} if ( $network->{'games'}{$args{'game'}}{'pid'} )
     }
-
-    return \%return_hash;
+    else {
+        return $network;
+    }
 }
 
 sub registerGame {
 
     my %args = (
         game => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'};
@@ -1720,7 +1688,7 @@ sub registerGame {
 sub deregisterGame {
     my %args = (
         game => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'};
@@ -1757,13 +1725,13 @@ sub deregisterGame {
     sendCommand( command => $cmd, game => $gateway, node => $node, ssh_master  => $args{'ssh_master'} );
 }
 
-# getFiles(game => 'benchmark');
+
 sub getFiles {
     my %args = (
         user => '',
         ip   => '',
         game => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'};
@@ -1800,9 +1768,6 @@ sub getFiles {
     my @files = $ssh->{'link'}->capture("cd $spath; find $game -type f ");
     chomp(@files);
 
-    #    for (@files) {
-    #        print "$_\n";
-    #    }
     return \@files;
 }
 
@@ -1863,7 +1828,7 @@ sub connectSSH {
         user        => '',
         ip          => '',
         ssh_master  => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $PID = $$;
@@ -1942,7 +1907,7 @@ sub haltGame {
     my %args = (
         game => '',
         node => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'};
@@ -1954,7 +1919,7 @@ sub haltGame {
 
     sleep(20);
 
-    unless ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
+    unless ( checkIsOnline( list_by => 'node', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
         app->log->info("Halt $game succeeded");
         return "Halt $game succeeded";
     }
@@ -1968,7 +1933,7 @@ sub haltGame {
 sub storeGame {
     my %args = (
         game => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'} or return "Game cannot be empty";
@@ -2075,7 +2040,7 @@ sub bootGame {
         game       => '',
         server_bin => '',
         upgrade    => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'};
@@ -2157,7 +2122,7 @@ sub bootStrap {
         game       => '',
         server_bin => '',
         upgrade    => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'};
@@ -2238,7 +2203,7 @@ sub bootStrap {
 sub deployGame {
     my %args = (
         game => '',
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $game = $args{'game'};
@@ -2308,7 +2273,7 @@ sub infoNode {
     my %args = (
         node => '',
         user => $config->{'default_user'},
-        @_,    # argument pair list goes here
+        @_,
     );
 
     my $output = {};
@@ -2646,14 +2611,10 @@ window.setTimeout(function() {
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
 
-        %# my %nodes     = %$nodes;
-        % my %history   = %$history;
-        % my %expected  = %$expected;
-
-        % for my $game (sort keys %$expected) {
-
+        % for my $game (sort keys %{$network->{'games'}} ) {
+        %# my $pool
+        %= next unless ( $network->{'games'}{$game}{'pool'} eq $pool );
       <div class="row height: 40px">
-
         <div class="col d-flex justify-content-start mb-2 shadow">
           <div class="media" >
             <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
@@ -2662,7 +2623,7 @@ window.setTimeout(function() {
                 alt="Generic placeholder image" height="35">
               </image>
             </a>
-            <a href="/log/<%= $expected->{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+            <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
               <img class="zoom align-self-top mr-3"
                 src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
                 alt="Generic placeholder image" height="35">
@@ -2671,58 +2632,49 @@ window.setTimeout(function() {
             <img class="zoom align-self-top mr-3"
               src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
               alt="Generic placeholder image" height="25">
-              </h4> <%= $game %> online</h4>
+              </h4> <%= $game %> </h4>
             </image>
           </div>
         </div>
-          % if ( ! $games->{$game}{'pid'} ) {
 
-
-            % if (app->minion->lock($game, 0)) {
-              <div class="col d-flex justify-content-end mb-2 shadow">
-                <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-                   justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
-                   href="/store/<%= $game %>/<%= $game %>"     role="button">store</a>
-                <a class="ml-1 btn btn-sm btn-outline-info custom
-                   justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
-                   href="/link/<%= $game %>/<%= $game %>"      role="button">link</a>
-                <a class="ml-1 btn btn-sm btn-outline-info custom
-                   justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
-                   href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
-                <a class="ml-1 btn btn-sm btn-danger     custom
-                   justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
-                   href="/halt/<%= $game %>/<%= $game %>"      role="button">halt</a>
-              </div>
-            % } else {
-              <div class="col d-flex justify-content-end mb-2 shadow">
-                <a class="ml-1 btn btn-sm btn-outline-danger
-                   justify-end" href="/minion/locks"      role="button">task is running</a>
-              </div>
-            % }
-          % } else {
-            % if (app->minion->lock($game, 0)) {
-              <div class="col d-flex justify-content-end mb-2 shadow">
-                <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-                   justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
-                   href="/deploy/<%= $game %>/<%= $game %>"    role="button">deploy</a>
-                <a class="ml-1 btn btn-sm btn-outline-info     custom
-                   justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
-                   href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
-                <a class="ml-1 btn btn-sm btn-success    custom
-                   justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
-                   href="/boot/<%= $game %>/<%= $game %>"      role="button">boot</a>
-              </div>
-            % } else {
-              <div class="col d-flex justify-content-end mb-2 shadow">
-                <a class="ml-1 btn btn-sm btn-outline-danger
-                   justify-end" data-toggle="tooltip" data-placement="top" title="for safety on a single job can run on each game"
-                   href="/minion/locks"      role="button">task is running</a>
-              </div>
-            % }
+        % if ( ! app->minion->lock($game, 0)) {
+          <div class="col d-flex justify-content-end mb-2 shadow">
+            <a class="ml-1 btn btn-sm btn-outline-danger
+               justify-end" href="/minion/locks"      role="button">task is running</a>
           </div>
-        % }
-      </div>
+          </div>
+        % next; }
+
+        % if ( defined $network->{'games'}{$game}{'pid'} ) {
+          <div class="col d-flex justify-content-end mb-2 shadow">
+            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
+              href="/store/<%= $game %>/<%= $game %>"     role="button">store</a>
+            <a class="ml-1 btn btn-sm btn-outline-info custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
+              href="/link/<%= $game %>/<%= $game %>"      role="button">link</a>
+            <a class="ml-1 btn btn-sm btn-outline-info custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
+            <a class="ml-1 btn btn-sm btn-danger     custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
+              href="/halt/<%= $game %>/<%= $game %>"      role="button">halt</a>
+          </div>
+        % } else {
+          <div class="col d-flex justify-content-end mb-2 shadow">
+            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
+              href="/deploy/<%= $game %>/<%= $game %>"    role="button">deploy</a>
+            <a class="ml-1 btn btn-sm btn-outline-info     custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
+            <a class="ml-1 btn btn-sm btn-success    custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
+              href="/boot/<%= $game %>/<%= $game %>"      role="button">boot</a>
+          </div>
       % }
+      </div>
+    % }
   </div>
 
 <script>
@@ -2758,12 +2710,8 @@ window.setTimeout(function() {
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
 
-        % my %nodes     = %$nodes;
-        % my %history   = %$history;
-        % my %expected  = %$expected;
-
-        % for my $node (sort keys %$nodes) {
-          % if ( ! $nodes{$node}{'offline'} ) {
+       % #for my $node ( sort keys %{$network->{nodes} ) {
+          % #if ( $network->{nodes}{$node}{'status'} eq 'online' ) {
 
 
             <div class="media mt-2">
@@ -2781,119 +2729,71 @@ window.setTimeout(function() {
 
         <div class="row height: 40px">
         <hr>
-        <h5 class="text-success">online</h5>
+        <h5 class="text-success">games</h5>
 
         </div>
-            % for my $game (sort keys %{$nodes{$node}}) {
-            <div class="row height: 40px">
-
-                % my $online        = 'true';   # = $node{$game}{'online'};
-                % my $isLobby       = 'false';  # = $node{$game}{'isLobby'};
-                % my $isRestricted  = 'false';  # = $node{$game}{'isRestricted'};
-<!-- NodePage Buttons -->
-                <div class="col d-flex justify-content-start mb-2 shadow">
-
-                      <div class="media" >
-                      <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3"
-                          src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
-                          alt="Generic placeholder image" height="35">
-                        </image>
-                      </a>
-                      <a href="/log/<%= $node %>/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3"
-                          src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
-                          alt="Generic placeholder image" height="35">
-                        </image>
-                      </a>
-                        <img class="zoom align-self-top mr-3"
-                          src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
-                          alt="Generic placeholder image" height="25">
-                          </h4> <%= $game %> </h4>
-                        </image>
-                      </div>
-                </div>
-
-                % if (app->minion->lock($game, 0)) {
-                <div class="col d-flex justify-content-end mb-2 shadow">
-                    <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-                        justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
-                        href="/store/<%= $game %>/<%= $node %>"     role="button">store</a>
-                    <a class="ml-1 btn btn-sm btn-outline-info custom
-                        justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
-                        href="/link/<%= $game %>/<%= $node %>"      role="button">link</a>
-                    <a class="ml-1 btn btn-sm btn-outline-info custom
-                                justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
-                                href="/drop/<%= $game %>/<%= $node %>"      role="button">drop</a>
-                    <a class="ml-1 btn btn-sm btn-danger     custom
-                        justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
-                        href="/halt/<%= $game %>/<%= $node %>"      role="button">halt</a>
-                </div>
-                % } else {
-                    <div class="col d-flex justify-content-end mb-2 shadow">
-                        <a class="ml-1 btn btn-sm btn-outline-danger
-                        justify-end" href="/minion/locks"      role="button">task is running</a>
-                    </div>
-                % }
-            </div>
-            % }
-
-
-        <div class="row height: 40px">
-        <hr>
-        <h5 class="text-danger">offline</h5>
-
+            % for my $game ( sort keys %{$network->{'games'}} ) {
+            % next unless ( $network->{'games'}{$game}{'node'} eq $node );
+      <div class="row height: 40px">
+        <div class="col d-flex justify-content-start mb-2 shadow">
+          <div class="media" >
+            <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
+              <img class="zoom align-self-top mr-3"
+                src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+                alt="Generic placeholder image" height="35">
+              </image>
+            </a>
+            <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+              <img class="zoom align-self-top mr-3"
+                src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
+                alt="Generic placeholder image" height="35">
+              </image>
+            </a>
+            <img class="zoom align-self-top mr-3"
+              src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
+              alt="Generic placeholder image" height="25">
+              </h4> <%= $game %> </h4>
+            </image>
+          </div>
         </div>
-            % for my $game (sort keys %{$expected}) {
-                % if ( $expected{$game}{'node'} eq $node && ! ${nodes}{$node}{$game}{'pid'} ) {
 
-                <div class="row height: 40px">
-                   <div class="col d-flex justify-content-start mb-2 shadow ">
-                    <div class="media" >
-                      <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3"
-                          src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
-                          alt="Generic placeholder image" height="35">
-                        </image>
-                      </a>
-                      <a href="/log/<%= $node %>/<%= $game %>" class="list-group-item-action list-group-item-light">
-                        <img class="zoom align-self-top mr-3"
-                          src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
-                          alt="Generic placeholder image" height="35">
-                        </image>
-                      </a>
-                      <img class="zoom align-self-top mr-3"
-                        src="http://www.splatage.com/wp-content/uploads/2022/08/minecraft-chest-icon-19.png"
-                        alt="Generic placeholder image" height="30">
-                        </h4> <%= $game %> </h4>
-                      </image>
-                    </div>
-                  </div>
+        % if ( ! app->minion->lock($game, 0)) {
+          <div class="col d-flex justify-content-end mb-2 shadow">
+            <a class="ml-1 btn btn-sm btn-outline-danger
+               justify-end" href="/minion/locks"      role="button">task is running</a>
+          </div>
+          </div>
+        % next; }
 
-
-                    % if (app->minion->lock($game, 0)) {
-                        <div class="col d-flex justify-content-end mb-2 shadow">
-                            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-                                justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
-                                href="/deploy/<%= $game %>/<%= $node %>"    role="button">deploy</a>
-                            <a class="ml-1 btn btn-sm btn-outline-info     custom
-                                justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
-                                href="/drop/<%= $game %>/<%= $node %>"      role="button">drop</a>
-                            <a class="ml-1 btn btn-sm btn-success    custom
-                                justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
-                                href="/boot/<%= $game %>/<%= $node %>"      role="button">boot</a>
-                        </div>
-                    % } else {
-                    <div class="col d-flex justify-content-end mb-2 shadow">
-                        <a class="ml-1 btn btn-sm btn-outline-danger
-                        justify-end" data-toggle="tooltip" data-placement="top" title="for safety on a single job can run on each game"
-                        href="/minion/locks"      role="button">task is running</a>
-                     </div>
-                    % }
-                </div>
-                % }
-            %}
-        % }
+        % if ( defined $network->{'games'}{$game}{'pid'} ) {
+          <div class="col d-flex justify-content-end mb-2 shadow">
+            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
+              href="/store/<%= $game %>/<%= $game %>"     role="button">store</a>
+            <a class="ml-1 btn btn-sm btn-outline-info custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
+              href="/link/<%= $game %>/<%= $game %>"      role="button">link</a>
+            <a class="ml-1 btn btn-sm btn-outline-info custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
+            <a class="ml-1 btn btn-sm btn-danger     custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
+              href="/halt/<%= $game %>/<%= $game %>"      role="button">halt</a>
+          </div>
+        % } else {
+          <div class="col d-flex justify-content-end mb-2 shadow">
+            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
+              href="/deploy/<%= $game %>/<%= $game %>"    role="button">deploy</a>
+            <a class="ml-1 btn btn-sm btn-outline-info     custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
+            <a class="ml-1 btn btn-sm btn-success    custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
+              href="/boot/<%= $game %>/<%= $game %>"      role="button">boot</a>
+          </div>
+      % }
+      </div>
     % }
   </div>
 
@@ -2929,10 +2829,8 @@ window.setTimeout(function() {
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
 
-      % my %nodes    = %$nodes;
-      % my %expected = %$expected;
-      % for my $node (sort keys %$nodes) {
-      % if ( ! $nodes{$node}{'offline'}{'offline'} ) {
+      % for my $node ( sort keys %{$network->{'nodes'}} ) {
+      % if ( $network->{'nodes'}{$node}{'status'} eq 'online' ) {
 
         <div class="col-12 col-md-3 shadow bg-medium mt-4 mb-2 rounded">
 
@@ -2945,38 +2843,36 @@ window.setTimeout(function() {
 
                   <%= $node %>
 
+
                 </a>
+                 <%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
+                 <%= int($network->{'nodes'}{$node}{'rss'}/1024/1024 + 0.5) %>G
              </img>
 
+<!--  games list  -->
                 <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
-                  % for my $game (sort keys %{$nodes{$node}}) {
-                    % if ( $game ne 'offline' ) {
-                      % if ( $list eq '' || $pool eq $expected->{$game}{'pool'} ) {
-                      <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
+                  % for my $game ( sort keys %{$network->{'games'}} ) {
+
+                  % next unless ( $network->{'games'}{$game}{'node'} eq $node );
+
+                    % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+
+                      <a href="/log/<%= $network->{'games'}{$game}{'node'} %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
                         <span style="float:right; mr-1" class="mr-1 fs-6">
-                        <small>
-                           <%= int($nodes->{$node}->{$game}->{'pcpu'} + 0.5) %>% |
-                           <%= int($nodes->{$node}->{$game}->{'rss'}/1024 + 0.5) %>M
+                         <small>
+                           <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %>% |
+                           <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M
                         </small>
-                        </span>
-                      </a>
-                      % }
-                    % }
-                  % }
-                </div>
-
-
-           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
-                %for my $game (sort keys %{$expected}) {
-                    % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) {
+                     % } else {
 
                      <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-danger mb-1">
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
                         <span style="float:right; mr-1" class="mr-1">
                         <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
+                       % }
                         </span>
 
                       </a>
@@ -2986,8 +2882,8 @@ window.setTimeout(function() {
            </div>
          </div>
          % }
-        % }
         <hr>
+
 
 <div class="alert alert-danger alert-dismissible fade show" role="alert">
   <h4 class="alert-heading">offline nodes</h4>
@@ -2997,10 +2893,9 @@ window.setTimeout(function() {
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
 
-      % %nodes    = %$nodes;
-      % %expected = %$expected;
-      % for my $node (sort keys %$nodes) {
-      % if ( $nodes{$node}{'offline'}{'offline'} ) {
+
+      % for my $node (sort keys %{$network->{'nodes'}} ) {
+      % if ( $network->{'nodes'}{$node}{'status'} eq 'offline' ) {
         <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">
 
           <div class="media mt-2">
@@ -3013,28 +2908,9 @@ window.setTimeout(function() {
 
                 </a>
              </img>
-                <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
-                  % for my $game (sort keys %{$nodes{$node}}) {
-                    % if ( $game ne 'offline' ) {
-
-                      <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
-                           <span class="badge badge-primary text-dark">
-                       <%= $game %></span>
-                        <span style="float:right; mr-1" class="mr-1 fs-6">
-                        <small>
-                           <%= int($nodes->{$node}->{$game}->{'pcpu'} + 0.5) %>% |
-                           <%= int($nodes->{$node}->{$game}->{'rss'}/1024 + 0.5) %>M
-                        </small>
-                        </span>
-                      </a>
-                    % }
-                  % }
-                </div>
-
-
            <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
-                %for my $game (sort keys %{$expected}) {
-                   % if ( ! $nodes{$node}{$game}{'pid'} && $expected{$game}{'node'} eq $node ) {
+                %for my $game ( sort keys %{$network->{'games'}} ) {
+                   % if ( $network->{'games'}{$game}{'node'} eq $node ) {
 
                      <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
                        <span class="badge badge-primary text-dark">
@@ -3052,7 +2928,6 @@ window.setTimeout(function() {
          % }
         % }
         <hr>
-
   </div>
 </body>
 </html>
