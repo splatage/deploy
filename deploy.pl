@@ -94,8 +94,8 @@ plugin Yancy => {
     games       => {
             # Show these columns in the Yancy editor
             'x-list-columns' =>
-            [qw( name node group release port mem_max store enabled isBungee )],
-            required        => [ 'name', 'group' ],
+            [qw( name node pool release port mem_max store enabled isBungee )],
+            required        => [ 'name', 'pool' ],
         },
     nodes => {
         'x-list-clomuns'    => [qw( name ip enabled isGateway )],
@@ -144,7 +144,7 @@ plugin Yancy => {
                 'x-order'   => 1,
                 type        => 'string',
             },
-            group           => {
+            pool            => {
                 'x-order'   => 2,
                 type        => 'string',
             },
@@ -277,7 +277,8 @@ under sub ($c) {
 
     $c->stash(
         is_admin => '',
-        username => '' );
+        username => '',
+        pool     => '' );
 
     $c->render( template => 'login' );
 
@@ -297,7 +298,7 @@ get '/update/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -338,7 +339,7 @@ get '/bootstrap/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -404,7 +405,7 @@ get '/boot/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -456,7 +457,7 @@ get '/halt/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -499,7 +500,7 @@ get '/deploy/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -540,7 +541,7 @@ get '/store/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -583,7 +584,7 @@ get '/link/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -623,7 +624,7 @@ get '/drop/:game/:node' => sub ($c) {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
 
-    if ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    if ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->minion->enqueue( $task => [$game], { attempts => 1, expire => 120 } );
         $c->flash( message => "sending minions to $task $game on $node " );
         app->log->info("$username from $ip initiated $task $game on $node" );
@@ -667,16 +668,77 @@ get '/' => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
+    my $pool       = $perms->{$username}{'pool'};
 
     $c->stash(
+        title    => 'network overview',
         nodes    => $results,
         perms    => $perms,
         expected => $game_settings,
         is_admin => $is_admin,
         username => $username,
+        pool     => $pool,
+        list     => ''
     );
 
     $c->render( template => 'index' );
+};
+
+get '/pool' => sub ($c) {
+
+    my $username    = $c->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
+    my $pool       = $perms->{$username}{'pool'};
+
+    my $results     = checkIsOnline(
+        list_by     => 'game',
+        ssh_master  => $config->{'ssh_master'}
+    );
+
+    app->log->warn(Dumper($results));
+
+    my $expected    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'pool',
+        value       => $pool,
+        hash_ref    => 'true'
+    );
+
+    foreach my $game ( sort keys %{$expected} ) {
+        $expected->{$game} = $results->{$game}{$game};
+      };
+
+    my $expected    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'pool',
+        value       => $pool,
+        hash_ref    => 'true'
+    );
+
+    my $jobs = app->minion->jobs(
+        {
+            queues => ['default'],
+            states => [ 'active', 'locked' ],
+            tasks  => [ 'boot',   'halt' ]
+        }
+    );
+
+    $c->stash(
+        games       => $results,
+        history     => $jobs,
+        expected    => $expected,
+        perms       => $perms,
+        is_admin    => $is_admin,
+        username    => $username,
+        pool        => $pool
+    );
+
+    $c->render(
+        template    => 'pool',
+
+    );
 };
 
 get '/info/:node/' => sub ($c) {
@@ -687,6 +749,7 @@ get '/info/:node/' => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
+    my $pool       = $perms->{$username}{'pool'};
 
     unless ( $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that " );
@@ -699,7 +762,8 @@ get '/info/:node/' => sub ($c) {
     $c->stash(
         results     => $results,
         is_admin    => $is_admin,
-        username    => $username
+        username    => $username,
+        pool        => $pool
     );
     $c->render( template => $template );
 };
@@ -721,6 +785,7 @@ get '/node/:node' => sub ($c) {
 
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
+    my $pool       = $perms->{$username}{'pool'};
 
     my $ip = readFromDB(
         table       => 'nodes',
@@ -754,6 +819,7 @@ get '/node/:node' => sub ($c) {
         perms       => $perms,
         is_admin    => $is_admin,
         username    => $username,
+        pool        => $pool
     );
 };
 
@@ -765,8 +831,9 @@ get '/files/:game'  => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
+    my $pool        = $perms->{$username}{'pool'};
 
-    unless ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested $template $game ");
         $c->redirect_to($c->req->headers->referrer);
@@ -776,7 +843,8 @@ get '/files/:game'  => sub ($c) {
     $c->stash(
         files       => @results,
         is_admin    => $is_admin,
-        username    => $username
+        username    => $username,
+        pool        => $pool
      );
     $c->render( template => $template );
 };
@@ -810,6 +878,7 @@ get '/logfile' => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
+    my $pool       = $perms->{$username}{'pool'};
 
     unless ( $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
@@ -819,7 +888,8 @@ get '/logfile' => sub ($c) {
 
     $c->stash(
         username    => $username,
-        is_admin    => $is_admin
+        is_admin    => $is_admin,
+        pool        => $pool
     );
 
     app->log->debug("retrieving logfile");
@@ -925,7 +995,7 @@ websocket '/log/:node/<game>-ws' => sub {
     my $node        = $self->stash('node');
     my $game        = $self->stash('game');
 
-    return unless ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' );
+    return unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' );
 
     my $loop;
 
@@ -1007,8 +1077,9 @@ get '/log/:node/:game' => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
+    my $pool       = $perms->{$username}{'pool'};
 
-    unless ( $game_settings->{$game}{'group'} eq $perms->{$username}{'group'} || $is_admin eq '1' ) {
+    unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested $template $game ");
         $c->redirect_to($c->req->headers->referrer);
@@ -1020,7 +1091,8 @@ get '/log/:node/:game' => sub ($c) {
         node        => $node,
         game        => $game,
         is_admin    => $is_admin,
-        username    => $username
+        username    => $username,
+        pool        => $pool
     );
 
     $c->render(
@@ -2425,51 +2497,56 @@ html {
 
 <nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark">
   <div class="container-fluid">
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01"
-        aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
+        <a class="navbar-brand" href="/">
+          <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
+          <%= $username %>
+       </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01"
+                aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
       </button>
+
   <div class="collapse navbar-collapse" id="navbarTogglerDemo01">
 
-  <a class="navbar-brand" href="/">
-     <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
-  </a>
-
-   <div class="container" id="navbarNav">
       <ul class="navbar-nav me-auto mb-2 mb-sm-0 nav-tabs">
+
       % if ( $username ) {
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="#"><h6><%= $username %></h6></a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/">network</a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/"><h6>home</h6></a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/pool"><%= $pool %></a>
         </li>
 
+        <!-- superuser menu to edit settings -->
         % if ( $c->yancy->auth->current_user->{'super_user'} ) {
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/yancy"><h6>settings</h6></a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/yancy">settings</a>
         </li>
         % }
+
+        <!-- admin user menus to minion, mojolicious logfile and reload  -->
         % if ( $is_admin ) {
         <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/minion"><h6>minions</h6></a>
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/minion">minions</a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/logfile"><h6>logfile</h6></a>
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/logfile">logfile</a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/reload"><h6>reload</h6></a>
+          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/reload">reload</a>
         </li>
         % }
+
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/status"><h6>status</h6></a>
+          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/status">status</a>
         </li>
         <li class="nav-item">
           <a class="btn-sm btn-outline-warning nav-link" role="button" target="_blank"
-          href="https://github.com/splatage/deploy/wiki"><h6>help</h6></a>
+          href="https://github.com/splatage/deploy/wiki">help</a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-danger nav-link" role="button" href="/yancy/auth/password/logout"><h6>logout</h6></a>
+          <a class="btn-sm btn-outline-danger nav-link" role="button" href="/yancy/auth/password/logout">logout</a>
         </li>
      % }
     </ul>
@@ -2551,6 +2628,117 @@ window.setTimeout(function() {
     });
 </script>
 -->
+</body>
+</html>
+
+
+@@ pool.html.ep
+% layout 'template';
+
+<meta http-equiv="refresh" content="10">
+<html>
+  <body>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <h4 class="alert-heading">my games: <%= $pool %> pool</h4>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+
+        %# my %nodes     = %$nodes;
+        % my %history   = %$history;
+        % my %expected  = %$expected;
+
+        % for my $game (sort keys %$expected) {
+
+      <div class="row height: 40px">
+
+        <div class="col d-flex justify-content-start mb-2 shadow">
+          <div class="media" >
+            <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
+              <img class="zoom align-self-top mr-3"
+                src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+                alt="Generic placeholder image" height="35">
+              </image>
+            </a>
+            <a href="/log/<%= $expected->{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+              <img class="zoom align-self-top mr-3"
+                src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
+                alt="Generic placeholder image" height="35">
+              </image>
+            </a>
+            <img class="zoom align-self-top mr-3"
+              src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
+              alt="Generic placeholder image" height="25">
+              </h4> <%= $game %> online</h4>
+            </image>
+          </div>
+        </div>
+          % if ( ! $games->{$game}{'pid'} ) {
+
+
+            % if (app->minion->lock($game, 0)) {
+              <div class="col d-flex justify-content-end mb-2 shadow">
+                <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+                   justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
+                   href="/store/<%= $game %>/<%= $game %>"     role="button">store</a>
+                <a class="ml-1 btn btn-sm btn-outline-info custom
+                   justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
+                   href="/link/<%= $game %>/<%= $game %>"      role="button">link</a>
+                <a class="ml-1 btn btn-sm btn-outline-info custom
+                   justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+                   href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
+                <a class="ml-1 btn btn-sm btn-danger     custom
+                   justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
+                   href="/halt/<%= $game %>/<%= $game %>"      role="button">halt</a>
+              </div>
+            % } else {
+              <div class="col d-flex justify-content-end mb-2 shadow">
+                <a class="ml-1 btn btn-sm btn-outline-danger
+                   justify-end" href="/minion/locks"      role="button">task is running</a>
+              </div>
+            % }
+          % } else {
+            % if (app->minion->lock($game, 0)) {
+              <div class="col d-flex justify-content-end mb-2 shadow">
+                <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+                   justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
+                   href="/deploy/<%= $game %>/<%= $game %>"    role="button">deploy</a>
+                <a class="ml-1 btn btn-sm btn-outline-info     custom
+                   justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+                   href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
+                <a class="ml-1 btn btn-sm btn-success    custom
+                   justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
+                   href="/boot/<%= $game %>/<%= $game %>"      role="button">boot</a>
+              </div>
+            % } else {
+              <div class="col d-flex justify-content-end mb-2 shadow">
+                <a class="ml-1 btn btn-sm btn-outline-danger
+                   justify-end" data-toggle="tooltip" data-placement="top" title="for safety on a single job can run on each game"
+                   href="/minion/locks"      role="button">task is running</a>
+              </div>
+            % }
+          </div>
+        % }
+      </div>
+      % }
+  </div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function (event) {
+        var scrollpos = sessionStorage.getItem('scrollpos');
+        if (scrollpos) {
+            window.scrollTo(0, scrollpos);
+            sessionStorage.removeItem('scrollpos');
+        }
+    });
+
+    window.addEventListener("beforeunload", function (e) {
+        sessionStorage.setItem('scrollpos', window.scrollY);
+    });
+</script>
+
 </body>
 </html>
 
@@ -2733,7 +2921,7 @@ window.setTimeout(function() {
 <html>
 
 <div class="alert alert-success alert-dismissible fade show" role="alert">
-  <h4 class="alert-heading">network overview</h4>
+  <h4 class="alert-heading"> <%= $title %> </h4>
   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 
@@ -2763,7 +2951,7 @@ window.setTimeout(function() {
                 <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
                   % for my $game (sort keys %{$nodes{$node}}) {
                     % if ( $game ne 'offline' ) {
-
+                      % if ( $list eq '' || $pool eq $expected->{$game}{'pool'} ) {
                       <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
@@ -2774,6 +2962,7 @@ window.setTimeout(function() {
                         </small>
                         </span>
                       </a>
+                      % }
                     % }
                   % }
                 </div>
@@ -3038,7 +3227,7 @@ window.setTimeout(function() {
         </button>
 
 <!-- Side Panel -->
-        <div class="offcanvas offcanvas-start" tabindex="-1" id="offcanvasExample" aria-labelledby="offcanvasExampleLabel">
+        <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="offcanvasExample" aria-labelledby="offcanvasExampleLabel">
             <div class="offcanvas-header">
                 <h5 class="offcanvas-title" id="offcanvasExampleLabel">Control Options</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
@@ -3072,6 +3261,11 @@ window.setTimeout(function() {
                         class="list-group-item list-group-item-action list-group-item-dark">halt</a>
                     <a href="/boot/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-dark">boot</a>
+                </div>
+
+                <h6 class="mt-3">admin</h6>
+                <hr>
+                <div class="list-group">
                     <a href="/bootstrap/<%= $game %>/<%= $node %>"
                         class="list-group-item list-group-item-action list-group-item-dark">bootstrap</a>
                 </div>
