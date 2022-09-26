@@ -2390,7 +2390,7 @@ body  {
     top: 0;
     right: 0;
     z-index: 99999;
-    width: 40%;
+    min-width: 40%;
 }
 
 .data a, .data span, .data tr, .data td { white-space: pre; }
@@ -2460,59 +2460,57 @@ html {
     % }
 
 
-<nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark">
+<nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark ">
   <div class="container-fluid">
         <a class="navbar-brand" href="/">
           <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
-          <%= $username %>
+          <small><%= $username %></small>
        </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01"
                 aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>
       </button>
 
-  <div class="collapse navbar-collapse" id="navbarTogglerDemo01">
+  <div class="collapse navbar-collapse " id="navbarTogglerDemo01">
 
-      <ul class="navbar-nav me-auto mb-2 mb-sm-0 nav-tabs">
+      <ul class="navbar-nav nav-tabs">
 
       % if ( $username ) {
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/">network</a>
+          <a class="nav-link" role="button" aria-current="page" href="/">network</a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" aria-current="page" href="/pool"><%= $pool %></a>
-        </li>
-
-        <!-- superuser menu to edit settings -->
-        % if ( $c->yancy->auth->current_user->{'super_user'} ) {
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/yancy">settings</a>
-        </li>
-        % }
-
-        <!-- admin user menus to minion, mojolicious logfile and reload  -->
-        % if ( $is_admin ) {
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/minion">minions</a>
+          <a class="nav-link" role="button" aria-current="page" href="/pool"><%= $pool %></a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/logfile">logfile</a>
+          <a class="nav-link" role="button" href="/status">status</a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" href="/reload">reload</a>
-        </li>
-        % }
-
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-secondary nav-link" role="button" href="/status">status</a>
-        </li>
-        <li class="nav-item">
-          <a class="btn-sm btn-outline-warning nav-link" role="button" target="_blank"
+          <a class="nav-link" role="button" target="_blank"
           href="https://github.com/splatage/deploy/wiki">help</a>
         </li>
         <li class="nav-item">
-          <a class="btn-sm btn-outline-danger nav-link" role="button" href="/yancy/auth/password/logout">logout</a>
+          <a class="nav-link" role="button" href="/yancy/auth/password/logout">logout</a>
         </li>
+
+        <!-- superuser menu to edit settings -->
+        <!-- admin user menus to minion, mojolicious logfile and reload  -->
+        % if ( $is_admin ) {
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+            admin
+          </a>
+          <ul class="dropdown-menu text-light bg-dark">
+            <li><a class="dropdown-item text-muted" href="/minion">minions</a></li>
+            <li><a class="dropdown-item text-muted" href="/logfile">logfile</a></li>
+            <li><a class="dropdown-item text-muted" href="/reload">reload</a></li>
+            % if ( $c->yancy->auth->current_user->{'super_user'} ) {
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-muted" href="/yancy">superuser</a></li>
+            % }
+          </ul>
+        </li>
+        % }
      % }
     </ul>
     </div>
@@ -2846,7 +2844,7 @@ window.setTimeout(function() {
 
                 </a>
                  <%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
-                 <%= int($network->{'nodes'}{$node}{'rss'}/1024/1024 + 0.5) %>G
+                 <%= int($network->{'nodes'}{$node}{'rss'}/1024 + 0.5) %>M
              </img>
 
 <!--  games list  -->
@@ -2877,10 +2875,11 @@ window.setTimeout(function() {
 
                       </a>
             % }
-        % }
+
             </div>
            </div>
          </div>
+          % }
          % }
         <hr>
 
