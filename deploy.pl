@@ -19,6 +19,7 @@ use Time::Seconds;
 use strict;
 use warnings;
 
+plugin 'StaticCache' => { even_in_dev => 1, max_age => 2592000 };
 
 ###########################################################
 ##         Declare Variables for Global Scope            ##
@@ -1583,7 +1584,7 @@ sub checkIsOnline {
         my $game = $temp_hash->{$result}{'game'};
 
         app->log->warn("[!!] $game is running multiple times!")
-          if ( $network->{'games'}{$game} );
+          if ( $network->{'games'}{$game}{'pid'} );
 
         $network->{'games'}{$game}{'node'} = $temp_hash->{$result}{'node'};
         $network->{'games'}{$game}{'user'} = $temp_hash->{$result}{'user'};
