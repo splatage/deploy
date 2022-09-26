@@ -1,18 +1,20 @@
 {
-    db_host             => '127.0.0.1',         # DataBase IP
-    db_user             => 'DB_username',       # Database Username
-    db_pass             => 'DB_password',       # Database Password
-    db_name             => 'DB_name',           # Database name
-    allow_registration  => '0',                 # NOT recomended. Set to true to create first user
-    log_level           => 'DEBUG',             # INFO, DEBUG, WARN, TRACE
-    default_user        => 'minecraft',         # Default SSH user to perform admin tasks
-    ssh_master          => 'true',              # Using SSH master socket for interface is faster
-    minion_ssh_master   => 'false',             # Is better to have own SSH socket for longer minion tasks
+    db_host             => '127.0.0.1',                      # DataBase IP
+    db_user             => 'DB_username',                    # Database Username
+    db_pass             => 'DB_password',                    # Database Password
+    db_name             => 'DB_name',                        # Database name
+    allow_registration  => '0',                              # NOT recomended. Set to true to create first user
+    log_level           => 'DEBUG',                          # INFO, DEBUG, WARN, TRACE
+    default_user        => 'minecraft',                      # Default SSH user to perform admin tasks
+    ssh_master          => 'true',                           # Using SSH master socket for interface is faster
+    minion_ssh_master   => 'false',                          # Is better to have own SSH socket for longer minion tasks
+    secret              => 'cantguessthissecret',            # Leave blank to regenerate a rendom secret each restart
+    poll_interval       => '5',                              # period in seconds to check logs over ssh
     
-       # to use ssl
-       # listen         => ['https://*:443?cert=/etc/tls/domain.crt&key=/etc/tls/domain.key'],
-    hypnotoad           => {   	
-        listen          => ['http://*:3000'],                # Use ssl above if encryption is required
+
+    hypnotoad           => {
+      # listen          => ['https://*:443?cert=/etc/tls/domain.crt&key=/etc/tls/domain.key'],
+        listen          => ['http://*:3000'],                # Use ssl like above if encryption is required
         workers         => 2,                                # Less workers are faster if we don't need them
         proxy           => 1,                                # Are we behind a reverse proxy - recomended layout
 	trusted_proxies => ['127.0.0.1', '192.168.0.0/16'],  # Lockdown connections to trusted sources
