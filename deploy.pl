@@ -291,6 +291,7 @@ under sub ($c) {
 ##  Minion Routes
 ###########################################################
 
+
 get '/update/:game/:node' => sub ($c) {
 
     my $task        = 'update';
@@ -707,13 +708,16 @@ get '/pool' => sub ($c) {
         }
     );
 
+    my $locks = getMinionLocks();
+
     $c->stash(
         network     => $network,
         history     => $jobs,
         perms       => $perms,
         is_admin    => $is_admin,
         username    => $username,
-        pool        => $pool
+        pool        => $pool,
+        locks       => $locks
     );
 
     $c->render(
@@ -793,6 +797,9 @@ get '/node/:node' => sub ($c) {
         }
     );
 
+    my $locks = getMinionLocks();
+
+
     $c->render(
         template    => 'node',
         network     => $network,
@@ -801,13 +808,14 @@ get '/node/:node' => sub ($c) {
         perms       => $perms,
         is_admin    => $is_admin,
         username    => $username,
-        pool        => $pool
+        pool        => $pool,
+        locks       => $locks
     );
 };
 
-get '/files/:game'  => sub ($c) {
+get '/filemanager/:game'  => sub ($c) {
 
-    my $template    = 'files';
+    my $template    = 'filemanager';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
     my $ip          = $c->remote_addr;
@@ -821,14 +829,88 @@ get '/files/:game'  => sub ($c) {
         $c->redirect_to($c->req->headers->referrer);
     };
 
-    my @results     = getFiles( game => $game );
+ #   my @results     = getFiles( game => $game );
     $c->stash(
-        files       => @results,
+ #       files       => @results,
         is_admin    => $is_admin,
         username    => $username,
-        pool        => $pool
+        pool        => $pool,
+        game        => $game
      );
     $c->render( template => $template );
+};
+
+websocket '/filemanager/<:game>-ws' => sub {
+
+    my $self        = shift;
+   # my $game        = $self->stash('game');
+    my $game = 'benchmark';
+    my $ip          = $self->remote_addr;
+    my $username    = $self->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
+    my $pool        = $perms->{$username}{'pool'};
+
+    return unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' );
+
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+       # field       => 'name',
+       # value       => $game,
+        hash_ref    => 'true'
+    );
+
+    my $sip = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $settings->{$game}{'store'},
+        hash_ref    => 'false'
+    );
+
+    my $store       = $settings->{$game}{'store'};
+    my $store_path  = $settings->{$game}{'store_path'};
+    my $store_user  = $settings->{$game}{'store_usr'};
+    my $path;
+    my @files;
+
+    $self->inactivity_timeout(1800);
+
+    app->log->debug("websockets filemanager");
+
+    my $ssh = connectSSH( user => $store_user, ip => $sip, ssh_master => 'false' );
+    return 1 if $ssh->{'error'};
+
+
+    my $send_data = sub {
+        my ($c, $hash) = @_;
+        my $content;
+
+        # Strip out any double dots
+        $hash->{path} =~ s/\.+//g;
+
+        my @files = $ssh->{'link'}->capture("cd $store_path/$hash->{path}; ls -lha") if $hash->{path};;
+        chomp(@files);
+
+        foreach my $line ( split( /\n/, @files ) ) {
+            $content .= '<div>' . $line . "</div>\n";
+        }
+
+        $self->send( $content );
+    };
+
+
+    $self->on(json => sub {
+        my ($c, $hash) = @_;
+
+         $send_data->($c, $hash);
+    });
+
+    $self->on(finish => sub ($ws, $code, $reason) {
+        app->log->info("WebSocket closed with status $code.");
+    });
+
+    $send_data->();
 };
 
 
@@ -1136,6 +1218,19 @@ websocket '/notify' => sub ($c) {
 ###########################################################
 ##    Functions
 ###########################################################
+
+sub getMinionLocks {
+
+    my $minion_locks = {};
+    my $results = app->minion->backend->list_jobs(0, 100, {states => ['inactive', 'active']} );
+
+    if (@{$results->{jobs}}) {
+        for my $job (@{$results->{jobs}}) {
+            $minion_locks->{$job->{args}[0]} = 'true';
+        }
+    }
+    return $minion_locks;
+}
 
 sub updatePage_game {
     my %args = (
@@ -2616,7 +2711,7 @@ window.setTimeout(function() {
       <div class="row height: 40px">
         <div class="col d-flex justify-content-start mb-2 shadow">
           <div class="media" >
-            <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
+            <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
               <img class="zoom align-self-top mr-3"
                 src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
                 alt="Generic placeholder image" height="35">
@@ -2636,7 +2731,7 @@ window.setTimeout(function() {
           </div>
         </div>
 
-        % if ( ! app->minion->lock($game, 0)) {
+        % if ( ! app->minion->lock($game, 0) or $locks->{$game} eq 'true' ) {
           <div class="col d-flex justify-content-end mb-2 shadow">
             <a class="ml-1 btn btn-sm btn-outline-danger
                justify-end" href="/minion/locks"      role="button">task is running</a>
@@ -2736,7 +2831,7 @@ window.setTimeout(function() {
       <div class="row height: 40px">
         <div class="col d-flex justify-content-start mb-2 shadow">
           <div class="media" >
-            <a href="/files/<%= $game %>" class="list-group-item-action list-group-item-light">
+            <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
               <img class="zoom align-self-top mr-3"
                 src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
                 alt="Generic placeholder image" height="35">
@@ -2756,7 +2851,7 @@ window.setTimeout(function() {
           </div>
         </div>
 
-        % if ( ! app->minion->lock($game, 0)) {
+        % if ( ! app->minion->lock($game, 0) or $locks->{$game} eq 'true' ) {
           <div class="col d-flex justify-content-end mb-2 shadow">
             <a class="ml-1 btn btn-sm btn-outline-danger
                justify-end" href="/minion/locks"      role="button">task is running</a>
@@ -3299,4 +3394,54 @@ $(document).ready ( function () {
     <td><ul id="fileList"></ul></td>
   </tr>
 </table>
+
+
+@@ filemanager.html.ep
+% layout 'template';
+
+<html>
+    <body class="m-0 border-0">
+      <div class="container-fluid text-left">
+        <div class="alert alert-success alert-dismissible fade show alert-fadeout" role="alert">
+            <h4 class="alert-heading"><%= $game %> file manager</h4>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      </div>
+
+        <div id='filemanager-content' class="text-wrap container-sm text-break">
+            %# This is the filemanager-content output
+        </div>
+
+        <!-- /serverlog/:task   -->
+  </div>
+  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script type="text/javascript">
+      $(document).ready(function () {
+            var ws_host = window.location.href;
+            ws_host = ws_host.replace(/http:/,"ws:");
+            ws_host = ws_host.replace(/https:/,"wss:");
+            ws_host = ws_host + "-ws";
+            var socket = new WebSocket(ws_host);
+
+            socket.onmessage = function (msg) {
+                $('#filemanager-content').append(msg.data);
+            }
+
+            function send(e) {
+                if (e.keyCode !== 13) {
+                    return false;
+                }
+
+                var cmd = document.getElementById('cmd').value;
+                document.getElementById('cmd').value = '';
+                console.log('send', cmd);
+                socket.send(JSON.stringify({cmd: cmd}));
+            }
+
+      document.getElementById('cmd').addEventListener('keypress', send);
+      document.getElementById('cmd').focus();
+      });
+    </script>
+</body>
+</html>
 
