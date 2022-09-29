@@ -845,9 +845,10 @@ websocket '/filemanager/<game>-ws' => sub {
     );
 
     my $store       = $settings->{$game}{'store'};
-    my $store_path  = $settings->{$game}{'store_path'} . "/";
+    my $store_path  = $settings->{$game}{'store_path'};
     my $store_user  = $settings->{$game}{'store_usr'};
-    my $path = qq($game/game_files);
+    my $home_dir    = $settings->{$game}{'store_path'};
+    my $path = '/' . $game;
     my @files;
 
     $self->inactivity_timeout(1800);
@@ -862,13 +863,14 @@ websocket '/filemanager/<game>-ws' => sub {
         my $content;
 
         # Strip out any double dots
-        #$hash->{path} =~ s/\.+//g;
-        $path = $hash->{path} if ( $hash->{path} );
+        $hash->{path} =~ s/\.*$//g;
+        $path = $hash->{base_dir} if ( $hash->{base_dir} );
+        app->log->debug("$game path: $path");
 
-        my @files = $ssh->{'link'}->capture("cd $store_path/$path; ls -lha --group-directories-first") ; #if $hash->{path};;
+        my @files = $ssh->{'link'}->capture("cd $home_dir/$path; ls -lha --group-directories-first") ; #if $hash->{path};;
         chomp(@files);
 
-        my $head = $ssh->{'link'}->capture("cd $store_path/$path; head -n 10 *");
+        my $head = $ssh->{'link'}->capture("cd $home_dir/$path; time find * -maxdepth 1 -type f -exec grep -IlH . {} + | xargs head -n 100");
            $head =~ s/\n/<newline>/g;
            #$head =~ s/==>/\n==>/g;
         my %file_content;
@@ -878,10 +880,10 @@ websocket '/filemanager/<game>-ws' => sub {
         my $num;
         foreach my $line ( split '==> ', $head ) {
         ++$num;
-            my $filename = $line;
-            $filename =~ s/^([^ <=]*) .*$/$1/;
-            $line =~ s/^[^ <=]* <==//;
-            $file_content{$filename} = $line;
+         my $filename                =  $line;
+            $filename                =~ s/^([^ <=]*) .*$/$1/;
+            $line                    =~ s/^[^ <=]* <==//;
+            $file_content{$filename} =  $line;
             $file_content{$filename} =~ s/<newline>/\n/g;
             app->log->trace("file $num: $filename");
         }
@@ -889,13 +891,24 @@ websocket '/filemanager/<game>-ws' => sub {
         $content  = q(<nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"><ol class="breadcrumb">);
 
         my @breadcrumbs = ( split '/', $path );
-
+        my $combined_crumbs = '';
+        
         foreach ( @breadcrumbs ) {
-            if (  $_ eq $breadcrumbs[-1]  ) {
-                $content .= qq(<li class="breadcrumb-item active" aria-current="page">$_</li>);
+            next if ( $_ =~ m/^$/ );
+        
+            unless (  $_ eq $breadcrumbs[-1]  ) {
+                $combined_crumbs .= '/' . $_;
+                $content .= qq(
+                <li class="breadcrumb-item text-primary" 
+                     type="submit" onclick="browser_path('$combined_crumbs')">
+                    $_
+                </li>
+                );
             }
             else {
-                $content .= qq(<li class="breadcrumb-item"><a href="#">$_</a></li>);
+                $content .= qq(
+                <li class="breadcrumb-item text-muted">$_</li>
+                );
             }
         }
 
@@ -909,6 +922,7 @@ websocket '/filemanager/<game>-ws' => sub {
             my $filename = $elements[-1];
 
             if ( $line =~ m/[0-9]+[MKG]$/ ) { next }
+            if ( $line =~ m/\.$/ ) { next }
             if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
             if ( $line =~ m/jar$/ )  { $icon = q(bi-filetype-java);  }
             if ( $line =~ m/json$/ ) { $icon = q(bi-filetype-json);  }
@@ -929,8 +943,8 @@ websocket '/filemanager/<game>-ws' => sub {
                 $content .= qq(
                 <span class="col-md-4">
                     <button class="btn" data-bs-target="#$id"
-                     type="submit" id="$id" value="$path/$elements[-1]" onclick="chpath($id)">
-                    <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;"></i>
+                     type="submit" id="$id" value="$path/$elements[-1]" onclick="browser_path('$path/$elements[-1]')">
+                    <i class="bi $icon" style="font-size: 1.75rem; color: $color;"></i>
                     $elements[-1]
                     </button>
                 </span>
@@ -954,12 +968,15 @@ websocket '/filemanager/<game>-ws' => sub {
                     <div class="offcanvas-body">
                         <div>
                           <h3>file: $elements[-1]</h3><hr>
+                           <h6>folder: $path</h6>
                            <h6>size: $elements[4]</h6>
                            <h6>modified: $elements[5] $elements[6] $elements[7]</h6>
                            <hr>
                            <h6>preview:</h6>
-
-                          <pre>$file_content{$filename}</pre>
+                            <div class="bg-success p-1 text-dark bg-opacity-10 rounded border border-success"
+                                style="--bs-border-opacity: .5;">
+                            <pre>$file_content{$filename}</pre>
+                           </div>
                         </div>
                     </div>
                   </div>
@@ -974,9 +991,9 @@ websocket '/filemanager/<game>-ws' => sub {
 
     $self->on(json => sub {
         my ($c, $hash) = @_;
-        app->log->info("incoming websocket request");
+        app->log->debug("incoming websocket request");
         my $bugs = Dumper($hash);
-        app->log->info("$bugs");
+        app->log->debug("$bugs");
          $send_data->($c, $hash);
     });
 
@@ -1002,10 +1019,9 @@ get '/filemanager/:game'  => sub ($c) {
         app->log->warn("IDS: $username from $ip requested $template $game ");
         $c->redirect_to($c->req->headers->referrer);
     };
-app->log->warn("filemanager $game ");
- #   my @results     = getFiles( game => $game );
+    app->log->info("filemanager $game ");
+
     $c->stash(
- #       files       => @results,
         is_admin    => $is_admin,
         username    => $username,
         pool        => $pool,
@@ -2570,7 +2586,7 @@ __DATA__
         integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT"
         crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css">
-
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 <style>
 body  {
     background-image: url("http://www.splatage.com/wp-content/uploads/2021/06/download-wallpaper-x-minecraft-backgroung-green-full-hd-p-hd-background-1478263362k8n4g.jpg");
@@ -3228,7 +3244,7 @@ window.setTimeout(function() {
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="alert alert-success alert-dismissible fade show alert-fadeout" role="alert">
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
             <h4 class="alert-heading">server logfile</h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
@@ -3284,7 +3300,7 @@ window.setTimeout(function() {
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="alert alert-success alert-dismissible fade show alert-fadeout" role="alert">
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
             <h4 class="alert-heading">command console: <%= $game %> on <%= $node %></h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
@@ -3505,7 +3521,7 @@ $(document).ready ( function () {
 <html>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-        <div class="alert alert-success alert-dismissible fade show alert-fadeout" role="alert">
+        <div class="alert alert-success alert-dismissible show" role="alert">
             <h4 class="alert-heading"><%= $game %> file manager</h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
@@ -3519,29 +3535,26 @@ $(document).ready ( function () {
 
 <!-- filemanager uploader -->
 
-
-        <!-- /serverlog/:task   -->
   </div>
 
-
-  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script type="text/javascript">
-      $(document).ready(function () {
-            var ws_host = window.location.href;
+    var socket;
+    var ws_host;
+     $(document).ready(function () {
+      debugger;
+            ws_host = window.location.href;
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
-            var socket = new WebSocket(ws_host);
+            socket = new WebSocket(ws_host);
 
             socket.onmessage = function (msg) {
                 $('#filemanager-content').html(msg.data);
             }
-
-            function chpath () {
-                var path = $('#path');
-                ws.send(JSON.stringify([path.val()]));
-            };
       });
+            function browser_path (msg) {
+                socket.send(JSON.stringify({base_dir: msg}));
+            };
     </script>
 </body>
 </html>
