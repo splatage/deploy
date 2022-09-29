@@ -813,42 +813,18 @@ get '/node/:node' => sub ($c) {
     );
 };
 
-get '/filemanager/:game'  => sub ($c) {
 
-    my $template    = 'filemanager';
-    my $game        = $c->stash('game');
-    my $node        = $c->stash('node');
-    my $ip          = $c->remote_addr;
-    my $username    = $c->yancy->auth->current_user->{'username'};
-    my $is_admin    = $perms->{$username}{'admin'};
-    my $pool        = $perms->{$username}{'pool'};
-
-    unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
-        $c->flash( error => "you dont have permission to do that" );
-        app->log->warn("IDS: $username from $ip requested $template $game ");
-        $c->redirect_to($c->req->headers->referrer);
-    };
-
- #   my @results     = getFiles( game => $game );
-    $c->stash(
- #       files       => @results,
-        is_admin    => $is_admin,
-        username    => $username,
-        pool        => $pool,
-        game        => $game
-     );
-    $c->render( template => $template );
-};
-
-websocket '/filemanager/<:game>-ws' => sub {
+websocket '/filemanager/<game>-ws' => sub {
 
     my $self        = shift;
-   # my $game        = $self->stash('game');
-    my $game = 'benchmark';
+    my $game        = $self->stash('game');
+   # my $game = 'benchmark';
     my $ip          = $self->remote_addr;
     my $username    = $self->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
     my $pool        = $perms->{$username}{'pool'};
+
+    app->log->info("opening $game filemanager for $username from $ip ");
 
     return unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' );
 
@@ -869,14 +845,13 @@ websocket '/filemanager/<:game>-ws' => sub {
     );
 
     my $store       = $settings->{$game}{'store'};
-    my $store_path  = $settings->{$game}{'store_path'};
+    my $store_path  = $settings->{$game}{'store_path'} . "/";
     my $store_user  = $settings->{$game}{'store_usr'};
-    my $path;
+    my $path = qq($game/game_files);
     my @files;
 
     $self->inactivity_timeout(1800);
-
-    app->log->debug("websockets filemanager");
+    $self->tx->with_compression;
 
     my $ssh = connectSSH( user => $store_user, ip => $sip, ssh_master => 'false' );
     return 1 if $ssh->{'error'};
@@ -887,22 +862,121 @@ websocket '/filemanager/<:game>-ws' => sub {
         my $content;
 
         # Strip out any double dots
-        $hash->{path} =~ s/\.+//g;
+        #$hash->{path} =~ s/\.+//g;
+        $path = $hash->{path} if ( $hash->{path} );
 
-        my @files = $ssh->{'link'}->capture("cd $store_path/$hash->{path}; ls -lha") if $hash->{path};;
+        my @files = $ssh->{'link'}->capture("cd $store_path/$path; ls -lha --group-directories-first") ; #if $hash->{path};;
         chomp(@files);
 
-        foreach my $line ( split( /\n/, @files ) ) {
-            $content .= '<div>' . $line . "</div>\n";
+        my $head = $ssh->{'link'}->capture("cd $store_path/$path; head -n 10 *");
+           $head =~ s/\n/<newline>/g;
+           #$head =~ s/==>/\n==>/g;
+        my %file_content;
+
+        app->log->trace("$game: $head");
+
+        my $num;
+        foreach my $line ( split '==> ', $head ) {
+        ++$num;
+            my $filename = $line;
+            $filename =~ s/^([^ <=]*) .*$/$1/;
+            $line =~ s/^[^ <=]* <==//;
+            $file_content{$filename} = $line;
+            $file_content{$filename} =~ s/<newline>/\n/g;
+            app->log->trace("file $num: $filename");
         }
 
+        $content  = q(<nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"><ol class="breadcrumb">);
+
+        my @breadcrumbs = ( split '/', $path );
+
+        foreach ( @breadcrumbs ) {
+            if (  $_ eq $breadcrumbs[-1]  ) {
+                $content .= qq(<li class="breadcrumb-item active" aria-current="page">$_</li>);
+            }
+            else {
+                $content .= qq(<li class="breadcrumb-item"><a href="#">$_</a></li>);
+            }
+        }
+
+        $content .= q(</ol> </nav><hr>);
+        $content .= q(<div class="container"><div class="row">);
+
+        for my $line ( @files ) {
+            my $color = 'light';
+            my $icon = q(bi-question-square);
+            my @elements = split( ' ', $line );
+            my $filename = $elements[-1];
+
+            if ( $line =~ m/[0-9]+[MKG]$/ ) { next }
+            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/jar$/ )  { $icon = q(bi-filetype-java);  }
+            if ( $line =~ m/json$/ ) { $icon = q(bi-filetype-json);  }
+            if ( $line =~ m/yml$/ )  { $icon = q(bi-filetype-yml); $color = 'green'   }
+            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/sh$/ )   { $icon = q(bi-filetype-sh);   }
+            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/sql$/ )  { $icon = q(bi-filetype-sql);   }
+            if ( $line =~ m/png$/ )  { $icon = q(bi-filetype-png);   }
+            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+
+            my $id =  $elements[-1];
+               $id =~ s/[^0-9a-zA-Z]/_/g;
+
+            if ( $line =~ m/^d/ ) {
+                $icon = q(bi-folder-fill); $color = 'green';
+                $content .= qq(
+                <span class="col-md-4">
+                    <button class="btn" data-bs-target="#$id"
+                     type="submit" id="$id" value="$path/$elements[-1]" onclick="chpath($id)">
+                    <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;"></i>
+                    $elements[-1]
+                    </button>
+                </span>
+               );
+            }
+            else {
+            $content .= qq(
+                <span class="col-md-4">
+                    <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
+                        aria-controls="$id">
+                    <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;"></i>
+                    $elements[-1]
+                    </button>
+                  <div class="offcanvas offcanvas-start" style="width: 750px;" tabindex="-1" id="$id"
+                        aria-labelledby="offcanvasExampleLabel">
+                    <div class="offcanvas-header">
+                        <h5 class="offcanvas-title" id="offcanvasExampleLabel">
+                        <i class="bi $icon" style="font-size: 3rem; color: $color;"></i></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+                    </div>
+                    <div class="offcanvas-body">
+                        <div>
+                          <h3>file: $elements[-1]</h3><hr>
+                           <h6>size: $elements[4]</h6>
+                           <h6>modified: $elements[5] $elements[6] $elements[7]</h6>
+                           <hr>
+                           <h6>preview:</h6>
+
+                          <pre>$file_content{$filename}</pre>
+                        </div>
+                    </div>
+                  </div>
+                 </span>
+                    );
+              }
+        }
+        $content .= q(</div></div>);
         $self->send( $content );
     };
 
 
     $self->on(json => sub {
         my ($c, $hash) = @_;
-
+        app->log->info("incoming websocket request");
+        my $bugs = Dumper($hash);
+        app->log->info("$bugs");
          $send_data->($c, $hash);
     });
 
@@ -913,6 +987,32 @@ websocket '/filemanager/<:game>-ws' => sub {
     $send_data->();
 };
 
+get '/filemanager/:game'  => sub ($c) {
+
+    my $template    = 'filemanager';
+    my $game        = $c->stash('game');
+    my $node        = $c->stash('node');
+    my $ip          = $c->remote_addr;
+    my $username    = $c->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
+    my $pool        = $perms->{$username}{'pool'};
+
+    unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
+        $c->flash( error => "you dont have permission to do that" );
+        app->log->warn("IDS: $username from $ip requested $template $game ");
+        $c->redirect_to($c->req->headers->referrer);
+    };
+app->log->warn("filemanager $game ");
+ #   my @results     = getFiles( game => $game );
+    $c->stash(
+ #       files       => @results,
+        is_admin    => $is_admin,
+        username    => $username,
+        pool        => $pool,
+        game        => $game
+     );
+    $c->render( template => $template );
+};
 
 get '/reload' => sub ($c) {
 
@@ -981,6 +1081,7 @@ websocket '/logfile-ws' => sub {
     my $loop;
 
     $self->inactivity_timeout(1800);
+    $self->tx->with_compression;
 
     app->log->debug("reading logfile via websocket");
 
@@ -1064,6 +1165,7 @@ websocket '/log/:node/<game>-ws' => sub {
     my $loop;
 
     $self->inactivity_timeout(1800);
+    $self->tx->with_compression;
 
     app->log->info("opening websocket for $username to read $game logfile on $node");
 
@@ -2467,6 +2569,7 @@ __DATA__
         rel="stylesheet"
         integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT"
         crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css">
 
 <style>
 body  {
@@ -3407,13 +3510,20 @@ $(document).ready ( function () {
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       </div>
+<!-- filemanager breadcrumbs -->
 
+<!-- filemanager content -->
         <div id='filemanager-content' class="text-wrap container-sm text-break">
             %# This is the filemanager-content output
         </div>
 
+<!-- filemanager uploader -->
+
+
         <!-- /serverlog/:task   -->
   </div>
+
+
   <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script type="text/javascript">
       $(document).ready(function () {
@@ -3424,22 +3534,13 @@ $(document).ready ( function () {
             var socket = new WebSocket(ws_host);
 
             socket.onmessage = function (msg) {
-                $('#filemanager-content').append(msg.data);
+                $('#filemanager-content').html(msg.data);
             }
 
-            function send(e) {
-                if (e.keyCode !== 13) {
-                    return false;
-                }
-
-                var cmd = document.getElementById('cmd').value;
-                document.getElementById('cmd').value = '';
-                console.log('send', cmd);
-                socket.send(JSON.stringify({cmd: cmd}));
-            }
-
-      document.getElementById('cmd').addEventListener('keypress', send);
-      document.getElementById('cmd').focus();
+            function chpath () {
+                var path = $('#path');
+                ws.send(JSON.stringify([path.val()]));
+            };
       });
     </script>
 </body>
