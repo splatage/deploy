@@ -870,12 +870,12 @@ websocket '/filemanager/<game>-ws' => sub {
         my @files = $ssh->{'link'}->capture("cd $home_dir/$path; ls -lha --group-directories-first") ; #if $hash->{path};;
         chomp(@files);
 
-        my $head = $ssh->{'link'}->capture("cd $home_dir/$path; time find * -maxdepth 1 -type f -exec grep -IlH . {} + | xargs head -n 100");
+        my $head = $ssh->{'link'}->capture("cd $home_dir/$path; find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs head -v -n 20");
            $head =~ s/\n/<newline>/g;
            #$head =~ s/==>/\n==>/g;
         my %file_content;
 
-        app->log->trace("$game: $head");
+        app->log->trace("$game heads: $head");
 
         my $num;
         foreach my $line ( split '==> ', $head ) {
@@ -885,21 +885,25 @@ websocket '/filemanager/<game>-ws' => sub {
             $line                    =~ s/^[^ <=]* <==//;
             $file_content{$filename} =  $line;
             $file_content{$filename} =~ s/<newline>/\n/g;
-            app->log->trace("file $num: $filename");
+            $file_content{$filename} =~ s/\</\&lt;/g;
+            $file_content{$filename} =~ s/\>/\&gt;/g;
+
+            app->log->trace("file: $num: $filename");
+            app->log->trace("preview: $file_content{$filename}");
         }
 
         $content  = q(<nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"><ol class="breadcrumb">);
 
         my @breadcrumbs = ( split '/', $path );
         my $combined_crumbs = '';
-        
+
         foreach ( @breadcrumbs ) {
             next if ( $_ =~ m/^$/ );
-        
+
             unless (  $_ eq $breadcrumbs[-1]  ) {
                 $combined_crumbs .= '/' . $_;
                 $content .= qq(
-                <li class="breadcrumb-item text-primary" 
+                <li class="breadcrumb-item text-primary"
                      type="submit" onclick="browser_path('$combined_crumbs')">
                     $_
                 </li>
@@ -928,15 +932,26 @@ websocket '/filemanager/<game>-ws' => sub {
             if ( $line =~ m/json$/ ) { $icon = q(bi-filetype-json);  }
             if ( $line =~ m/yml$/ )  { $icon = q(bi-filetype-yml); $color = 'green'   }
             if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
-            if ( $line =~ m/sh$/ )   { $icon = q(bi-filetype-sh);   }
-            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/sh$/ )   { $icon = q(bi-filetype-sh);    }
+            if ( $line =~ m/log[.0-9]*$/ )  { $icon = q(bi-journal-bookmark);   }
             if ( $line =~ m/sql$/ )  { $icon = q(bi-filetype-sql);   }
             if ( $line =~ m/png$/ )  { $icon = q(bi-filetype-png);   }
-            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
-            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/rc$/ )   { $icon = q(bi-gear);           }
+            if ( $line =~ m/gz$/ )  { $icon = q(bi-file-earmark-zip);   }
 
             my $id =  $elements[-1];
-               $id =~ s/[^0-9a-zA-Z]/_/g;
+               $id =~ s/[^0-9a-zA-Z]//g;
+
+            my $preview;
+            if ($file_content{$filename} ne '' ) {
+                $preview = qq(
+                    <h6>preview:</h6>
+                    <div class="bg-success p-1 text-dark bg-opacity-10 rounded border border-success shadow"
+                        style="--bs-border-opacity: .5;">
+                        <pre>$file_content{$filename}</pre>
+                    </div>
+                );
+             }
 
             if ( $line =~ m/^d/ ) {
                 $icon = q(bi-folder-fill); $color = 'green';
@@ -959,24 +974,20 @@ websocket '/filemanager/<game>-ws' => sub {
                     $elements[-1]
                     </button>
                   <div class="offcanvas offcanvas-start" style="width: 750px;" tabindex="-1" id="$id"
-                        aria-labelledby="offcanvasExampleLabel">
+                        aria-labelledby="$id">
                     <div class="offcanvas-header">
-                        <h5 class="offcanvas-title" id="offcanvasExampleLabel">
-                        <i class="bi $icon" style="font-size: 3rem; color: $color;"></i></h5>
+                        <h5 class="offcanvas-title" id="$id">
+                        <i class="bi $icon" style="font-size: 3.5rem; color: $color;"></i></h5>
                         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
                     </div>
                     <div class="offcanvas-body">
                         <div>
-                          <h3>file: $elements[-1]</h3><hr>
+                          <h4>file: $elements[-1]</h4><hr>
                            <h6>folder: $path</h6>
                            <h6>size: $elements[4]</h6>
                            <h6>modified: $elements[5] $elements[6] $elements[7]</h6>
                            <hr>
-                           <h6>preview:</h6>
-                            <div class="bg-success p-1 text-dark bg-opacity-10 rounded border border-success"
-                                style="--bs-border-opacity: .5;">
-                            <pre>$file_content{$filename}</pre>
-                           </div>
+                            $preview
                         </div>
                     </div>
                   </div>
@@ -3526,10 +3537,13 @@ $(document).ready ( function () {
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       </div>
-<!-- filemanager breadcrumbs -->
+<!-- filemanager modal editor -->
+        <div id='filemanager-editor' class="text-break container-sm text-break">
+            %# This is the filemanager-content output
+        </div>
 
 <!-- filemanager content -->
-        <div id='filemanager-content' class="text-wrap container-sm text-break">
+        <div id='filemanager-content' class="text-break container-sm text-break">
             %# This is the filemanager-content output
         </div>
 
