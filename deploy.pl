@@ -7,6 +7,7 @@ use DBD::mysql;
 use DBI;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
+use Mojo::JSON qw(decode_json encode_json);
 #use IO::Socket::SSL;
 use Digest::Bcrypt;
 use Data::Entropy::Algorithms qw(rand_bits);
@@ -895,7 +896,7 @@ websocket '/filemanager/<game>-ws' => sub {
         $content  = q(<nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"><ol class="breadcrumb">);
 
         my @breadcrumbs = ( split '/', $path );
-        my $combined_crumbs = '';
+        my $combined_crumbs;
 
         foreach ( @breadcrumbs ) {
             next if ( $_ =~ m/^$/ );
@@ -1427,85 +1428,100 @@ sub updatePage {
 }
 
 sub update {
-    my %args = (
-        game    => '',
-        node    => '',
-        ip      => '',
-        project => '',
-        release => '',
+    my %args        = (
+        game        => '',
+        node        => '',
+        ip          => '',
+        project     => '',
+        release     => '',
         @_,
     );
 
     my ( $project, $release, $version );
 
-    my $game = $args{'game'} or return 1;
+    my $game        = $args{'game'} or return 1;
 
-    my $settings = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        field    => 'name',
-        value    => $game,
-        hash_ref => 'true'
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'true'
     );
-    my $ip = readFromDB(
-        table    => 'nodes',
-        column   => 'ip',
-        field    => 'name',
-        value    => $settings->{$game}{'node'},
-        hash_ref => 'false'
+    my $ip          = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $settings->{$game}{'node'},
+        hash_ref    => 'false'
     );
 
     if ( $settings->{$game}{isBungee} eq '1' ) {
-        $project = 'waterfall';
+         $project   = 'waterfall';
     }
     else {
-        $project = 'paper';
+        $project    = 'paper';
     }
 
-    $release = $settings->{$game}{release};
+    $release        = $settings->{$game}{release};
 
-    # Get latest release version
+     # Get latest release version
     my $project_url =
-      "https://api.papermc.io/v2/projects/$project/versions/$release/";
-    my $ua     = Mojo::UserAgent->new();
-    my $builds = $ua->get($project_url)->result->json;
+        "https://api.papermc.io/v2/projects/$project/versions/$release/";
+    my $ua          = Mojo::UserAgent->new();
+    my $builds      = $ua->get($project_url)->result->json;
 
-    my $latest    = $builds->{'builds'}[-1];
-    my $file_name = "$project-$release-$latest.jar";
+    my $latest      = $builds->{'builds'}[-1];
+    my $file_name   = "$project-$release-$latest.jar";
 
-    $project_url = $project_url . '/builds/' . $latest;
-    my $meta   = $ua->get("$project_url")->result->json;
-    my $sha256 = $meta->{'downloads'}->{'application'}{'sha256'};
+       $project_url = $project_url . '/builds/' . $latest;
+    my $meta        = $ua->get("$project_url")->result->json;
+    my $sha256      = $meta->{'downloads'}->{'application'}{'sha256'};
 
-    my $path =
-        $settings->{$game}{'node_path'} . '/'
-      . $game
-      . '/game_files/'
-      . $file_name;
+    my $path        = $settings->{$game}{'node_path'} . '/'
+                    . $game
+                    . '/game_files/';
 
     # Install Latest version
-    my $user = $settings->{$game}{'node_usr'};
+    my $user        = $settings->{$game}{'node_usr'};
+    my $ssh         = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
 
-    my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
-    $project_url = $project_url . '/downloads/' . $file_name;
-    my $cmd = 'wget -c ' . $project_url . ' -O ' . $path;
-
-    print "connect: $user.$ip   $cmd\n";
+    $project_url    = $project_url . '/downloads/' . $file_name;
+    my $cmd         = 'wget -t 2 -T 30 -c ' . $project_url . ' -O ' . $path . $file_name;
 
     $ssh->{'link'}->system("$cmd");
 
-    $cmd = "sha256sum $path";
-    my @sha_file =
-      split( / /, $ssh->{'link'}->capture("$cmd") );
+    $cmd            = "sha256sum $path . $file_name";
+    my @sha_file    = split( / /, $ssh->{'link'}->capture("$cmd") );
 
     if ( $sha_file[0] eq $sha256 ) {
-        return "$file_name SHA passed";
+        return "$file_name";
     }
     else {
-        return "$file_name corrupted";
+        app->log->warn("$game $file_name update failed or was corrupted");
+
+        my $versions = $ssh->{'link'}->capture("cat $path/version_history.json ");
+           app->log->debug("$versions");
+           $version  = decode_json $versions;
+
+        my $db = Dumper($version);
+           app->log->debug("hash: $db");
+
+        my $current_version = lc( $version->{'currentVersion'} );
+
+           # Parse the currentVersion.json file to retrieve previous successful
+           # server jar
+           # git-Paper-177 (MC: 1.19.2)
+           # git-$project-$build (MC: $release)
+           # paper-1.19-81.jar
+
+        my ( $git, $project, $build, $cabbage, $release ) = split( /[ :\(\)-]+/, $current_version );
+           app->log->warn("rolling back to version: $project-$release-$build.jar ");
+
+        return "$project-$release-$build.jar";
     }
 }
 
@@ -2198,7 +2214,7 @@ sub storeGame {
         hash_ref => 'false'
     );
 
-    app->log->info("store Gameserver: $game");
+    app->log->info("storing: $game");
 
     $user  = $settings->{$game}{'node_usr'};
     $suser = $settings->{$game}{'store_usr'};
@@ -2307,7 +2323,7 @@ sub bootGame {
     $settings->{$game}{'java_flags'} =~ s/^'//; s/'$//;
 
     my $invocation;
-       $invocation  = qq( cd $path && screen -h 10000 -L -dmS $game );
+       $invocation  = qq( cd $path && screen -h 100000 -L -dmS $game );
        $invocation .= qq( $settings->{$game}{'java_bin'} );
        $invocation .= qq( -Xms$settings->{$game}{'mem_min'} );
        $invocation .= qq( -Xmx$settings->{$game}{'mem_max'} );
@@ -3533,7 +3549,11 @@ $(document).ready ( function () {
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
         <div class="alert alert-success alert-dismissible show" role="alert">
-            <h4 class="alert-heading"><%= $game %> file manager</h4>
+            <h4 class="alert-heading">
+                       <img class="align-self-left mr-3"
+                        src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+                        alt="Generic placeholder image" height="50">
+                    </image><%= $game %> file manager</h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       </div>
@@ -3555,7 +3575,6 @@ $(document).ready ( function () {
     var socket;
     var ws_host;
      $(document).ready(function () {
-      debugger;
             ws_host = window.location.href;
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
