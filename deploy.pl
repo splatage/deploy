@@ -867,13 +867,12 @@ websocket '/filemanager/<game>-ws' => sub {
         $path = $hash->{base_dir} if ( $hash->{base_dir} );
         app->log->debug("$game path: $path");
 
-        my @files = $ssh->{'link'}->capture("cd $home_dir/$path; ls -lha --group-directories-first") ; #if $hash->{path};;
+        my @files = $ssh->{'link'}->capture("[ -d $home_dir/$path ] && cd $home_dir/$path && ls -lha --group-directories-first") ; #if $hash->{path};;
         chomp(@files);
 
-        my $head  = $ssh->{'link'}->capture("cd $home_dir/$path; find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs head -v -n 20 ");
+        my $head  = $ssh->{'link'}->capture("[ -d $home_dir/$path ] && cd $home_dir/$path && find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs head -v -n 20 ");
 
            $head =~ s/\n/<newline>/g;
-           #$head =~ s/==>/\n==>/g;
         my %file_content;
 
         app->log->trace("$game heads: $head");
@@ -1283,7 +1282,7 @@ get '/log/:node/:game' => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
-    my $pool       = $perms->{$username}{'pool'};
+    my $pool        = $perms->{$username}{'pool'};
 
     unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
@@ -2332,7 +2331,8 @@ sub bootGame {
        $boot_strap .= qq( [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml && );
        $boot_strap .= qq( [ -f server.properties ] && sed -i '/online-mode=/s/true/false' server.properties  );
 
-    $settings->{$game}{'java_flags'} =~ s/^'//; s/'$//;
+    $settings->{$game}{'java_flags'} =~ s/^'//;
+    $settings->{$game}{'java_flags'} =~ s/'$//;
 
     my $invocation;
        $invocation  = qq( cd $path && screen -h 50000 -L -dmS $game );
