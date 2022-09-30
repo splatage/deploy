@@ -10,14 +10,13 @@
     minion_ssh_master   => 'false',                          # Is better to have own SSH socket for longer minion tasks
     secret              => 'cantguessthissecret',            # Leave blank to regenerate a rendom secret each restart
     poll_interval       => '5',                              # period in seconds to check logs over ssh
-    
 
     hypnotoad           => {
       # listen          => ['https://*:443?cert=/etc/tls/domain.crt&key=/etc/tls/domain.key'],
         listen          => ['http://*:3000'],                # Use ssl like above if encryption is required
-        workers         => 2,                                # Less workers are faster if we don't need them
+        workers         => 1,                                # Less workers are faster if we don't need them
         proxy           => 1,                                # Are we behind a reverse proxy - recomended layout
-	trusted_proxies => ['127.0.0.1', '192.168.0.0/16'],  # Lockdown connections to trusted sources
-        spare           => 2,                                # Extra capacity just incase
+        trusted_proxies => ['127.0.0.1', '192.168.0.0/16'],  # Lockdown connections to trusted sources
+        spare           => 3,                                # Extra capacity just incase
     }
 }
