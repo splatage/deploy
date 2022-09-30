@@ -1506,7 +1506,7 @@ sub update {
 
     $ssh->{'link'}->system("$cmd");
 
-    $cmd            = "sha256sum $path . $file_name";
+    $cmd            = "sha256sum $path/$file_name";
     my @sha_file    = split( / /, $ssh->{'link'}->capture("$cmd") );
 
     if ( $sha_file[0] eq $sha256 ) {
@@ -2361,12 +2361,12 @@ sub bootGame {
     sleep(10);
 
     if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
-        app->log->info("$game");
+        app->log->info("$game is online");
         return 0;
     }
     else {
-        app->log->info("$game");
-        return 0;
+        app->log->info("$game boot failed");
+        return 1;
     }
 }
 
