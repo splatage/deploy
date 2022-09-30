@@ -8,7 +8,6 @@ use DBI;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
 use Mojo::JSON qw(decode_json encode_json);
-#use IO::Socket::SSL;
 use Digest::Bcrypt;
 use Data::Entropy::Algorithms qw(rand_bits);
 use Minion;
@@ -483,7 +482,7 @@ app->minion->add_task(
 
         my $store = storeGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '1_store' => "$game $store" );
-        my $halt = haltGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
+        my $halt = haltGame( game => $game, ssh_master    => $config->{'minion_ssh_master'} );
         $job->note( '2_halt' => "$game $halt" );
 
         $job->app->log->info("$task $game completed");
@@ -871,7 +870,8 @@ websocket '/filemanager/<game>-ws' => sub {
         my @files = $ssh->{'link'}->capture("cd $home_dir/$path; ls -lha --group-directories-first") ; #if $hash->{path};;
         chomp(@files);
 
-        my $head = $ssh->{'link'}->capture("cd $home_dir/$path; find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs head -v -n 20");
+        my $head  = $ssh->{'link'}->capture("cd $home_dir/$path; find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs head -v -n 20 ");
+
            $head =~ s/\n/<newline>/g;
            #$head =~ s/==>/\n==>/g;
         my %file_content;
@@ -940,6 +940,19 @@ websocket '/filemanager/<game>-ws' => sub {
             if ( $line =~ m/rc$/ )   { $icon = q(bi-gear);           }
             if ( $line =~ m/gz$/ )  { $icon = q(bi-file-earmark-zip);   }
 
+            if ( $line =~ m/json$/ && $file_content{$filename} ne '' ) {
+
+             $file_content{$filename} =~ s/":"/" => "/g;
+             $file_content{$filename} =~ s/,([^{])/,\n    $1/g;
+             $file_content{$filename} =~ s/,\{/,\n\{/g;
+             $file_content{$filename} =~ s/\{/\{\n    /g;
+             $file_content{$filename} =~ s/}/\n}/g;
+
+            #$file_content{$filename} = decode_json $file_content{$filename};
+            #$file_content{$filename} = Dumper($file_content{$filename});
+
+           #app->log->debug("hash: $db");
+            }
             my $id =  $elements[-1];
                $id =~ s/[^0-9a-zA-Z]//g;
 
@@ -977,13 +990,12 @@ websocket '/filemanager/<game>-ws' => sub {
                   <div class="offcanvas offcanvas-start" style="width: 750px;" tabindex="-1" id="$id"
                         aria-labelledby="$id">
                     <div class="offcanvas-header">
-                        <h5 class="offcanvas-title" id="$id">
-                        <i class="bi $icon" style="font-size: 3.5rem; color: $color;"></i></h5>
+                        <h5 class="offcanvas-title align-bottom" id="$id">
+                        <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $elements[-1] </h5>
                         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
                     </div>
                     <div class="offcanvas-body">
                         <div>
-                          <h4>file: $elements[-1]</h4><hr>
                            <h6>folder: $path</h6>
                            <h6>size: $elements[4]</h6>
                            <h6>modified: $elements[5] $elements[6] $elements[7]</h6>
@@ -1010,7 +1022,7 @@ websocket '/filemanager/<game>-ws' => sub {
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
-        app->log->info("WebSocket closed with status $code.");
+        app->log->debug("WebSocket closed with status $code.");
     });
 
     $send_data->();
@@ -1134,7 +1146,7 @@ websocket '/logfile-ws' => sub {
     };
 
     $self->on(finish => sub ($ws, $code, $reason) {
-        app->log->info("WebSocket closed with status $code.");
+        app->log->debug("WebSocket closed with status $code.");
         Mojo::IOLoop->remove($loop);
     });
 
@@ -1195,7 +1207,7 @@ websocket '/log/:node/<game>-ws' => sub {
     $self->inactivity_timeout(1800);
     $self->tx->with_compression;
 
-    app->log->info("opening websocket for $username to read $game logfile on $node");
+    app->log->debug("opening websocket for $username to read $game logfile on $node");
 
     my $send_data;
     my $line_index;
@@ -1254,7 +1266,7 @@ websocket '/log/:node/<game>-ws' => sub {
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
-        app->log->info("WebSocket closed with status $code.");
+        app->log->debug("WebSocket closed with status $code.");
         Mojo::IOLoop->remove($loop);
     });
 
@@ -2323,7 +2335,7 @@ sub bootGame {
     $settings->{$game}{'java_flags'} =~ s/^'//; s/'$//;
 
     my $invocation;
-       $invocation  = qq( cd $path && screen -h 100000 -L -dmS $game );
+       $invocation  = qq( cd $path && screen -h 50000 -L -dmS $game );
        $invocation .= qq( $settings->{$game}{'java_bin'} );
        $invocation .= qq( -Xms$settings->{$game}{'mem_min'} );
        $invocation .= qq( -Xmx$settings->{$game}{'mem_max'} );
@@ -2349,12 +2361,12 @@ sub bootGame {
     sleep(10);
 
     if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
-        app->log->info("$game boot succeded");
+        app->log->info("$game");
         return 0;
     }
     else {
-        app->log->info("$game boot failed");
-        return 1;
+        app->log->info("$game");
+        return 0;
     }
 }
 
@@ -2638,8 +2650,8 @@ body  {
 .data a, .data span, .data tr, .data td { white-space: pre; }
 
 #command-content{
-    text-indent:  -20px;
-    padding-left: 26px; font-size: small; color: #41FF00;
+    text-indent: -0.5em;
+    padding-left: 1em; font-size: small; color: #41FF00;
     height: 70vh;
     overflow: auto;
     display: flex;
@@ -3289,33 +3301,45 @@ window.setTimeout(function() {
             <a class="btn btn-outline-success" href="/serverlog/trace" role="button">trace</a>
         </div>
   </div>
-  <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script type="text/javascript">
-      $(document).ready(function () {
-            var ws_host = window.location.href;
+    var socket;
+    var ws_host;
+
+    $(document).ready(function () {
+        connect();
+
+        function connect() {
+            ws_host = window.location.href;
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
-            var socket = new WebSocket(ws_host);
+            socket = new WebSocket(ws_host);
+
+            socket.onclose = function(e) {
+                console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+                setTimeout(function() {
+                    connect();
+                }, 1000);
+            };
 
             socket.onmessage = function (msg) {
                 $('#command-content').prepend(msg.data);
+            };
+        };
+
+        function send(e) {
+            if (e.keyCode !== 13) {
+                return false;
             }
+            var cmd = document.getElementById('cmd').value;
+            document.getElementById('cmd').value = '';
+            console.log('send', cmd);
+            socket.send(JSON.stringify({cmd: cmd}));
+        };
 
-            function send(e) {
-                if (e.keyCode !== 13) {
-                    return false;
-                }
-
-                var cmd = document.getElementById('cmd').value;
-                document.getElementById('cmd').value = '';
-                console.log('send', cmd);
-                socket.send(JSON.stringify({cmd: cmd}));
-            }
-
-      document.getElementById('cmd').addEventListener('keypress', send);
-      document.getElementById('cmd').focus();
-      });
+    document.getElementById('cmd').addEventListener('keypress', send);
+    document.getElementById('cmd').focus();
+    } );
     </script>
 </body>
 </html>
@@ -3403,33 +3427,46 @@ window.setTimeout(function() {
 </body>
 
 <!-- $('html, body').animate({scrollTop: $(document).height()}, 'slow'); -->
-<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
     <script type="text/javascript">
-      $(document).ready(function () {
-            var ws_host = window.location.href;
+    var socket;
+    var ws_host;
+
+    $(document).ready(function () {
+        connect();
+
+        function connect() {
+            ws_host = window.location.href;
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
-            var socket = new WebSocket(ws_host);
+            socket = new WebSocket(ws_host);
+
+            socket.onclose = function(e) {
+                console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+                setTimeout(function() {
+                    connect();
+                }, 1000);
+            };
 
             socket.onmessage = function (msg) {
                 $('#command-content').prepend(msg.data);
+            };
+        };
+
+        function send(e) {
+            if (e.keyCode !== 13) {
+                return false;
             }
+            var cmd = document.getElementById('cmd').value;
+            document.getElementById('cmd').value = '';
+            console.log('send', cmd);
+            socket.send(JSON.stringify({cmd: cmd}));
+        };
 
-            function send(e) {
-                if (e.keyCode !== 13) {
-                    return false;
-                }
-
-                var cmd = document.getElementById('cmd').value;
-                document.getElementById('cmd').value = '';
-                console.log('send', cmd);
-                socket.send(JSON.stringify({cmd: cmd}));
-            }
-
-      document.getElementById('cmd').addEventListener('keypress', send);
-      document.getElementById('cmd').focus();
-      });
+    document.getElementById('cmd').addEventListener('keypress', send);
+    document.getElementById('cmd').focus();
+    } );
     </script>
 </html>
 
@@ -3574,20 +3611,34 @@ $(document).ready ( function () {
     <script type="text/javascript">
     var socket;
     var ws_host;
-     $(document).ready(function () {
+
+    $(document).ready(function () {
+        connect();
+
+        function connect() {
             ws_host = window.location.href;
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
             socket = new WebSocket(ws_host);
 
+            socket.onclose = function(e) {
+                console.log('Socket is closed. Reconnect will be attempted in 5 seconds', e.reason);
+                setTimeout(function() {
+                    connect();
+                }, 5000);
+            };
+
             socket.onmessage = function (msg) {
                 $('#filemanager-content').html(msg.data);
-            }
-      });
-            function browser_path (msg) {
-                socket.send(JSON.stringify({base_dir: msg}));
             };
+        };
+     } );
+
+    function browser_path (msg) {
+        socket.send(JSON.stringify({base_dir: msg}));
+    };
+
     </script>
 </body>
 </html>
