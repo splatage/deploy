@@ -1206,11 +1206,11 @@ websocket '/log/:node/<game>-ws' => sub {
     $self->inactivity_timeout(1800);
     $self->tx->with_compression;
 
-    app->log->debug("opening websocket for $username to read $game logfile on $node");
+    app->log->info("opening websocket for $username to read $game logfile on $node");
 
     my $send_data;
     my $line_index;
-    my $logdata = {};
+    my $logdata;
     my $screenlog;
 
     $send_data = sub {
@@ -1236,12 +1236,12 @@ websocket '/log/:node/<game>-ws' => sub {
         $logdata->{'content'} =~ s/([^\n]{60})(\[[0-9:]{8})/$1\n$2/g;   # Newline for log timestamps
 
         foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
-            $content = "<div>" . $_ . "</div>\n" . $content;
+            $content = "<div>" . $_ . "</div>\n" . $content if $_;
         };
         $logdata->{'content'} = '';
         $screenlog = $logdata->{'screenlog'};
         $line_index = $logdata->{'line_index'};
-        $self->send( $content );
+        $self->send( $content ) if $content;
 
    };
 
@@ -1257,20 +1257,20 @@ websocket '/log/:node/<game>-ws' => sub {
                         ssh_master  => $config->{'minion_ssh_master'}
          ) if $hash->{cmd};
 
-         app->log->warn("$username sent console command to $game on $node:");
-         app->log->warn(" # $hash->{cmd}");
+         app->log->info("$username sent console command to $game on $node:");
+         app->log->info(" # $hash->{cmd}");
          Time::HiRes::sleep( 0.2 );
 
          $send_data->();
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
-        app->log->debug("WebSocket closed with status $code.");
+        app->log->info("WebSocket closed with status $code.");
         Mojo::IOLoop->remove($loop);
     });
 
     $send_data->();
-    $loop = Mojo::IOLoop->recurring($config->{'poll_interval'}, $send_data);
+    $loop = Mojo::IOLoop->recurring($config->{'poll_interval'} => $send_data);
 };
 
 
