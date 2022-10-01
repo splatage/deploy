@@ -15,7 +15,8 @@ use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
-
+use Text::ParseWords;
+use MIME::Base64;
 use strict;
 use warnings;
 
@@ -861,35 +862,28 @@ websocket '/filemanager/<game>-ws' => sub {
     my $send_data = sub {
         my ($c, $hash) = @_;
         my $content;
+        my %file_content;
+
 
         # Strip out any double dots
         $hash->{path} =~ s/\.*$//g;
         $path = $hash->{base_dir} if ( $hash->{base_dir} );
         app->log->debug("$game path: $path");
 
-        my @files = $ssh->{'link'}->capture("[ -d $home_dir/$path ] && cd $home_dir/$path && ls -lha --group-directories-first") ; #if $hash->{path};;
-        chomp(@files);
-
-        my $head  = $ssh->{'link'}->capture("[ -d $home_dir/$path ] && cd $home_dir/$path && find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs head -v -n 20 ");
-
+        my $files = $ssh->{'link'}->capture("[ -d '$home_dir/$path' ] && cd '$home_dir/$path' && ls -lhQa --group-directories-first") ; #if $hash->{path};;
+        my $head  = $ssh->{'link'}->capture("[ -d '$home_dir/$path' ] && cd '$home_dir/$path' && find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs -d '\n' head -v -n 100 ");
            $head =~ s/\n/<newline>/g;
-        my %file_content;
-
-        app->log->trace("$game heads: $head");
+           app->log->trace("$game heads: $head");
 
         my $num;
-        foreach my $line ( split '==> ', $head ) {
+        foreach ( split '==> ', $head ) {
         ++$num;
-         my $filename                =  $line;
-            $filename                =~ s/^([^ <=]*) .*$/$1/;
-            $line                    =~ s/^[^ <=]* <==//;
-            $file_content{$filename} =  $line;
-            $file_content{$filename} =~ s/<newline>/\n/g;
-            $file_content{$filename} =~ s/\</\&lt;/g;
-            $file_content{$filename} =~ s/\>/\&gt;/g;
+         my ($filename, $line_content) =  (split ' <==', $_ );
+            $file_content{$filename}   =  $line_content;
+            $file_content{$filename}   =~ s/<newline>/\n/g;
+            $file_content{$filename}   =~ s/>/\&gt;/g;
+            $file_content{$filename}   =~ s/</\&lt;/g;
 
-            app->log->trace("file: $num: $filename");
-            app->log->trace("preview: $file_content{$filename}");
         }
 
         $content  = q(<nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"><ol class="breadcrumb">);
@@ -919,41 +913,40 @@ websocket '/filemanager/<game>-ws' => sub {
         $content .= q(</ol> </nav><hr>);
         $content .= q(<div class="container"><div class="row">);
 
-        for my $line ( @files ) {
+        foreach my $line ( split '\n',  $files ) {
             my $color = 'light';
             my $icon = q(bi-question-square);
-            my @elements = split( ' ', $line );
+            my @elements = quotewords( '\s+', 0, $line );
             my $filename = $elements[-1];
 
             if ( $line =~ m/[0-9]+[MKG]$/ ) { next }
-            if ( $line =~ m/\.$/ ) { next }
-            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
-            if ( $line =~ m/jar$/ )  { $icon = q(bi-filetype-java);  }
-            if ( $line =~ m/json$/ ) { $icon = q(bi-filetype-json);  }
-            if ( $line =~ m/yml$/ )  { $icon = q(bi-filetype-yml); $color = 'green'   }
-            if ( $line =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
-            if ( $line =~ m/sh$/ )   { $icon = q(bi-filetype-sh);    }
-            if ( $line =~ m/log[.0-9]*$/ )  { $icon = q(bi-journal-bookmark);   }
-            if ( $line =~ m/sql$/ )  { $icon = q(bi-filetype-sql);   }
-            if ( $line =~ m/png$/ )  { $icon = q(bi-filetype-png);   }
-            if ( $line =~ m/rc$/ )   { $icon = q(bi-gear);           }
-            if ( $line =~ m/gz$/ )  { $icon = q(bi-file-earmark-zip);   }
+            if ( $line =~ m/\."$/ ) { next }
+            if ( $line =~ m/txt"$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/jar"$/ )  { $icon = q(bi-filetype-java);  }
+            if ( $line =~ m/json"$/ ) { $icon = q(bi-filetype-json);  }
+            if ( $line =~ m/yml"$/ )  { $icon = q(bi-filetype-yml); $color = 'green'   }
+            if ( $line =~ m/txt"$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $line =~ m/sh"$/ )   { $icon = q(bi-filetype-sh);    }
+            if ( $line =~ m/log[.0-9]*"$/ )  { $icon = q(bi-journal-bookmark);   }
+            if ( $line =~ m/sql"$/ )  { $icon = q(bi-filetype-sql);   }
+            if ( $line =~ m/png"$/ )  { $icon = q(bi-filetype-png);   }
+            if ( $line =~ m/rc"$/ )   { $icon = q(bi-gear);           }
+            if ( $line =~ m/gz"$/ )  { $icon = q(bi-file-earmark-zip);   }
 
-            if ( $line =~ m/json$/ && $file_content{$filename} ne '' ) {
-
+            if ( $line =~ m/json"$/ && $file_content{$filename} ne '' ) {
              $file_content{$filename} =~ s/":"/" => "/g;
              $file_content{$filename} =~ s/,([^{])/,\n    $1/g;
              $file_content{$filename} =~ s/,\{/,\n\{/g;
              $file_content{$filename} =~ s/\{/\{\n    /g;
              $file_content{$filename} =~ s/}/\n}/g;
-
-            #$file_content{$filename} = decode_json $file_content{$filename};
-            #$file_content{$filename} = Dumper($file_content{$filename});
-
-           #app->log->debug("hash: $db");
             }
-            my $id =  $elements[-1];
-               $id =~ s/[^0-9a-zA-Z]//g;
+
+            my $id = '';
+            for my $i (0..10) {
+                $id .= chr(rand(25) + 97);
+            }
+
+            app->log->trace("id: $elements[-1] -> $id");
 
             my $preview;
             if ($file_content{$filename} ne '' ) {
@@ -964,7 +957,7 @@ websocket '/filemanager/<game>-ws' => sub {
                         <pre>$file_content{$filename}</pre>
                     </div>
                 );
-             }
+            }
 
             if ( $line =~ m/^d/ ) {
                 $icon = q(bi-folder-fill); $color = 'green';
