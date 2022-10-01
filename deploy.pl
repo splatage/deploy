@@ -1022,8 +1022,8 @@ websocket '/filemanager/<game>-ws' => sub {
         app->log->info("file content: $content");
         my $encoded = encode_base64($content);
 
-        $content = qq(data:application/octet-stream;base64,$encoded);
-        $self->send( encode_json{ get_file => $content } ) if $content;
+        $content = qq(data:application/octet-stream;name=@folders[-1];base64,$encoded);
+        $self->send( encode_json{ get_file => $content, name => @folders[-1] } ) if $content;
        # $self->send( $content ) if $content;
     };
 
@@ -3655,7 +3655,11 @@ $(document).ready ( function () {
                     $('#filemanager-content').html(data.base_dir);
                 };
                 if ( 'get_file' in data ) {
-                    window.open(data.get_file);
+                    const link    = document.createElement('a');
+                    link.download = data.name;
+                    link.href     = data.get_file;
+                    link.click();
+                    // window.open(data.get_file);
                 };
             };
         };
