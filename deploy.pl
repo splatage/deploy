@@ -819,7 +819,6 @@ websocket '/filemanager/<game>-ws' => sub {
 
     my $self        = shift;
     my $game        = $self->stash('game');
-   # my $game = 'benchmark';
     my $ip          = $self->remote_addr;
     my $username    = $self->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
@@ -832,8 +831,6 @@ websocket '/filemanager/<game>-ws' => sub {
     my $settings    = readFromDB(
         table       => 'games',
         column      => 'name',
-       # field       => 'name',
-       # value       => $game,
         hash_ref    => 'true'
     );
 
@@ -859,7 +856,7 @@ websocket '/filemanager/<game>-ws' => sub {
     return 1 if $ssh->{'error'};
 
 
-    my $send_data = sub {
+    my $browser = sub {
         my ($c, $hash) = @_;
         my $content;
         my %file_content;
@@ -939,6 +936,7 @@ websocket '/filemanager/<game>-ws' => sub {
              $file_content{$filename} =~ s/,\{/,\n\{/g;
              $file_content{$filename} =~ s/\{/\{\n    /g;
              $file_content{$filename} =~ s/}/\n}/g;
+             $file_content{$filename} =~ s/\n[ \t]*\n/\n/g;
             }
 
             my $id = '';
@@ -984,6 +982,10 @@ websocket '/filemanager/<game>-ws' => sub {
                     <div class="offcanvas-header">
                         <h5 class="offcanvas-title align-bottom" id="$id">
                         <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $elements[-1] </h5>
+                        <button class="btn btn-outline-primary" type="submit" data-bs-dismiss="offcanvas"
+                                onclick="get_file('$path/$elements[-1]')">
+                            download
+                        </button>
                         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
                     </div>
                     <div class="offcanvas-body">
@@ -1001,23 +1003,46 @@ websocket '/filemanager/<game>-ws' => sub {
               }
         }
         $content .= q(</div></div>);
-        $self->send( $content );
+        $content = encode_json{ base_dir => $content };
+        $self->send("$content");
     };
 
+
+    my $get_file = sub {
+        my ($c, $hash) = @_;
+
+        app->log->info("file download requested");
+
+        my $file = $hash->{get_file} if ( $hash->{get_file} );
+        app->log->info("file: $home_dir/$file");
+        my @folders = (split '/', $file );
+
+
+        my $content = $ssh->{'link'}->capture("[ -f '$home_dir/$file' ] && cat '$home_dir/$file'");
+        app->log->info("file content: $content");
+        my $encoded = encode_base64($content);
+
+        $content = qq(data:application/octet-stream;base64,$encoded);
+        $self->send( encode_json{ get_file => $content } ) if $content;
+       # $self->send( $content ) if $content;
+    };
 
     $self->on(json => sub {
         my ($c, $hash) = @_;
         app->log->debug("incoming websocket request");
         my $bugs = Dumper($hash);
         app->log->debug("$bugs");
-         $send_data->($c, $hash);
+
+         $browser->($c, $hash) if $hash->{base_dir};
+         $get_file->($c, $hash) if $hash->{get_file};
+
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
         app->log->debug("WebSocket closed with status $code.");
     });
 
-    $send_data->();
+    $browser->();
 };
 
 get '/filemanager/:game'  => sub ($c) {
@@ -3622,14 +3647,25 @@ $(document).ready ( function () {
                 }, 5000);
             };
 
-            socket.onmessage = function (msg) {
-                $('#filemanager-content').html(msg.data);
+
+            socket.onmessage = function (e) {
+                console.log(event.data);
+                var data = JSON.parse(e.data);
+                if ( 'base_dir' in data ) {
+                    $('#filemanager-content').html(data.base_dir);
+                };
+                if ( 'get_file' in data ) {
+                    window.open(data.get_file);
+                };
             };
         };
      } );
 
     function browser_path (msg) {
         socket.send(JSON.stringify({base_dir: msg}));
+    };
+    function get_file (msg) {
+        socket.send(JSON.stringify({get_file: msg}));
     };
 
     </script>
