@@ -1017,23 +1017,28 @@ websocket '/filemanager/<game>-ws' => sub {
         my $file = $hash->{get_file} if ( $hash->{get_file} );
         app->log->info("file: $home_dir/$file");
 
-        my @folders  = (split '/', $file );
-        my $filename = $folders[-1];
+        my @folders  =  (split '/', $file );
+        my $filename =  $folders[-1];
+           #$filename =~ s/ /_/g;
+        my $filepath = $file;
+           $filepath =~ s/[^\/]+$//;
 
         my $id = '';
         for my $i (0..10) {
             $id .= chr(rand(25) + 97);
         }
 
-        # my $content = $ssh->{'link'}->capture("[ -f '$home_dir/$file' ] && cat '$home_dir/$file'");
-        #app->log->info("file content: $content");
+        # $Net::OpenSSH::debug = ~0;
         my $path = path("tmp/$id")->make_path;
-        $ssh->{'link'}->scp_get("$home_dir/$file", "tmp/$id/$filename");
-        app->log->info("$home_dir/$file => tmp/$id/$filename");
+
+        my $cmd = qq(cd "$home_dir$filepath"; tar czf - "$filename");
+        my $remote = $ssh->{'link'}->make_remote_command($cmd);
+        system "$remote | tar xvzf - -C tmp/$id  ";
+
+        #app->log->info("$ssh->{'link'}->error");
 
         my $encoded = encode_base64("$id/$filename");
-#        $content = qq(data:text/plain;name=@folders[-1];base64,$encoded);
-        #my $content = qq(href='download/$id');
+;
         app->log->info("$encoded");
         $self->send( encode_json{ path => "download", filename => $encoded } ) ;
        # $self->send( $content ) if $content;
@@ -1106,7 +1111,7 @@ get '/download/:id' => sub {
     #$self->reply->static("tmp/$id");
     $self->reply->file(app->home->child('tmp', "$id"));
 
-    $path = $path->remove_tree({keep_root => 1});
+    # $path = $path->remove_tree;
 
 };
 
