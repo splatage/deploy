@@ -8,6 +8,7 @@ use DBI;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
 use Mojo::JSON qw(decode_json encode_json);
+use Mojo::File  qw(path );
 use Digest::Bcrypt;
 use Data::Entropy::Algorithms qw(rand_bits);
 use Minion;
@@ -1015,15 +1016,26 @@ websocket '/filemanager/<game>-ws' => sub {
 
         my $file = $hash->{get_file} if ( $hash->{get_file} );
         app->log->info("file: $home_dir/$file");
-        my @folders = (split '/', $file );
 
+        my @folders  = (split '/', $file );
+        my $filename = $folders[-1];
 
-        my $content = $ssh->{'link'}->capture("[ -f '$home_dir/$file' ] && cat '$home_dir/$file'");
-        app->log->info("file content: $content");
-        my $encoded = encode_base64($content);
+        my $id = '';
+        for my $i (0..10) {
+            $id .= chr(rand(25) + 97);
+        }
 
-        $content = qq(data:application/octet-stream;name=@folders[-1];base64,$encoded);
-        $self->send( encode_json{ get_file => $content, name => @folders[-1] } ) if $content;
+        # my $content = $ssh->{'link'}->capture("[ -f '$home_dir/$file' ] && cat '$home_dir/$file'");
+        #app->log->info("file content: $content");
+        my $path = path("tmp/$id")->make_path;
+        $ssh->{'link'}->scp_get("$home_dir/$file", "tmp/$id/$filename");
+        app->log->info("$home_dir/$file => tmp/$id/$filename");
+
+        my $encoded = encode_base64("$id/$filename");
+#        $content = qq(data:text/plain;name=@folders[-1];base64,$encoded);
+        #my $content = qq(href='download/$id');
+        app->log->info("$encoded");
+        $self->send( encode_json{ path => "download", filename => $encoded } ) ;
        # $self->send( $content ) if $content;
     };
 
@@ -1070,6 +1082,34 @@ get '/filemanager/:game'  => sub ($c) {
      );
     $c->render( template => $template );
 };
+
+
+get '/download/:id' => sub {
+    my $self        = shift;
+    my $ip          = $self->remote_addr;
+    my $username    = $self->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
+    my $id          = $self->stash('id');
+
+
+   # return unless ( $username );
+   $id = decode_base64($id);
+
+   my $path = path("tmp/$id");
+       app->log->info("download route: $id");
+
+   my $filename = $path->basename;
+
+
+    $self->res->headers->content_disposition("attachment; filename=$filename;");
+
+    #$self->reply->static("tmp/$id");
+    $self->reply->file(app->home->child('tmp', "$id"));
+
+    $path = $path->remove_tree({keep_root => 1});
+
+};
+
 
 get '/reload' => sub ($c) {
 
@@ -3638,7 +3678,9 @@ $(document).ready ( function () {
             ws_host = ws_host.replace(/http:/,"ws:");
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
-            socket = new WebSocket(ws_host);
+             socket = new WebSocket(ws_host);
+         //   socket = new WebSocket('<%= url_for('filemanager/' . $game . '-ws')->to_abs %>');
+         //   console.log(socket);
 
             socket.onclose = function(e) {
                 console.log('Socket is closed. Reconnect will be attempted in 5 seconds', e.reason);
@@ -3649,17 +3691,17 @@ $(document).ready ( function () {
 
 
             socket.onmessage = function (e) {
-                console.log(event.data);
+                console.log(e.data);
                 var data = JSON.parse(e.data);
                 if ( 'base_dir' in data ) {
                     $('#filemanager-content').html(data.base_dir);
                 };
-                if ( 'get_file' in data ) {
+                if ( 'filename' in data ) {
                     const link    = document.createElement('a');
-                    link.download = data.name;
-                    link.href     = data.get_file;
+                    link.download = data.filename;
+                    link.href     = window.location.origin + "/" + data.path + "/" + data.filename;
+                    console.log(link.href);
                     link.click();
-                    // window.open(data.get_file);
                 };
             };
         };
