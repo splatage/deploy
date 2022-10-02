@@ -1,6 +1,6 @@
 #!/bin/bash
-MINION_WORKERS=2
-MINION_JOBS=4
+MINION_WORKERS=1
+MINION_JOBS=8
 MOJO_APP=deploy.pl
 
 function start_mojo () {
