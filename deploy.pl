@@ -1111,7 +1111,7 @@ get '/download/:id' => sub {
     #$self->reply->static("tmp/$id");
     $self->reply->file(app->home->child('tmp', "$id"));
 
-    # $path = $path->remove_tree;
+    $path = $path->remove_tree;
 
 };
 
