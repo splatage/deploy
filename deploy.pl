@@ -3848,6 +3848,65 @@ $(document).ready ( function () {
         socket.send(JSON.stringify({upload_file: msg}));
     };
 
+     Element.prototype.remove = function() {
+	    this.parentElement.removeChild(this);
+	}
+	NodeList.prototype.remove = HTMLCollection.prototype.remove = function() {
+	    for(var i = 0, len = this.length; i < len; i++) {
+	        if(this[i] && this[i].parentElement) {
+	            this[i].parentElement.removeChild(this[i]);
+	        }
+	    }
+	}
+    var worker = new Worker('fileupload.js');
+    worker.onmessage = function(e) {
+	  var li = document.getElementById(escape(e.data.data));
+	  if (li)
+		  li.remove();
+	  else
+          alert(e.data.data);
+}
+worker.onerror =werror;
+function werror(e) {
+  console.log('ERROR: Line ', e.lineno, ' in ', e.filename, ': ', e.message);
+ }
+function handleFileSelect(evt) {
+ //evt.stopPropagation();
+ evt.preventDefault();
+
+ var files = evt.dataTransfer.files||evt.target.files;
+ // FileList object.
+ try {
+ worker.postMessage({
+ 'files' : files
+ });
+ } catch(e) {
+     alert('Can\'t spawn files to worker - '+e)
+     return
+ }
+ //Sending File list to worker
+ // files is a FileList of File objects. List some properties.
+ var output = [];
+ for (var i = 0, f; f = files[i]; i++) {
+  output.push('<li id="',escape(f.name),'"><strong>', escape(f.name), '</strong> (', f.type || 'n/a', ') - ', f.size, ' bytes, last modified: ', f.lastModifiedDate ? f.lastModifiedDate.toLocaleDateString() : 'n/a', '</li>');
+ }
+ document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
+}
+
+function handleDragOver(evt) {
+ //evt.stopPropagation();
+ evt.preventDefault();
+ evt.dataTransfer.dropEffect = 'copy';
+ // Explicitly show this is a copy.
+ return false;
+}
+
+// Setup the dnd listeners.
+var dropZone = document.getElementById('drop_zone');
+dropZone.addEventListener('dragover', handleDragOver, false);
+dropZone.addEventListener('drop', handleFileSelect, false);
+ document.getElementById('files').addEventListener('change', handleFileSelect, false);
+
     </script>
 </body>
 </html>
