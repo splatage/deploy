@@ -870,7 +870,7 @@ websocket '/filemanager/<game>-ws' => sub {
         app->log->debug("$game path: $path");
 
         my $files = $ssh->{'link'}->capture("[ -d '$home_dir/$path' ] && cd '$home_dir/$path' && ls -lhQa --group-directories-first") ; #if $hash->{path};;
-        my $head  = $ssh->{'link'}->capture("[ -d '$home_dir/$path' ] && cd '$home_dir/$path' && find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs -d '\n' head -v -n 100 ");
+        my $head  = $ssh->{'link'}->capture("[ -d '$home_dir/$path' ] && cd '$home_dir/$path' && find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs -d '\n' head -v -n 15 ");
            $head =~ s/\n/<newline>/g;
            app->log->trace("$game heads: $head");
 
