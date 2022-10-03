@@ -1097,22 +1097,21 @@ get '/download/:id' => sub {
     my $id          = $self->stash('id');
 
 
-   # return unless ( $username );
+   return unless ( $username );
    $id = decode_base64($id);
 
    my $path = path("tmp/$id");
-       app->log->info("download route: $id");
+        app->log->info("download route: $id");
 
-   my $filename = $path->basename;
+   my $filename =  $path->basename;
+   my $filepath =  $id;
+      $filepath =~ s/[^\/]+$//;
 
+      $self->res->headers->content_disposition("attachment; filename=$filename;");
+      $self->reply->file(app->home->child('tmp', "$id"));
 
-    $self->res->headers->content_disposition("attachment; filename=$filename;");
-
-    #$self->reply->static("tmp/$id");
-    $self->reply->file(app->home->child('tmp', "$id"));
-
-    $path = $path->remove_tree;
-
+      $path->remove_tree({keep_root => 1}, "tmp/$filepath");
+        app->log->info("path: $path");
 };
 
 
@@ -1144,7 +1143,7 @@ get '/logfile' => sub ($c) {
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
-    my $pool       = $perms->{$username}{'pool'};
+    my $pool        = $perms->{$username}{'pool'};
 
     unless ( $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
