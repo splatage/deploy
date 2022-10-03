@@ -9,6 +9,7 @@ use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
 use Mojo::JSON qw(decode_json encode_json);
 use Mojo::File  qw(path );
+use Mojo::Util qw(b64_encode b64_decode url_escape url_unescape);
 use Digest::Bcrypt;
 use Data::Entropy::Algorithms qw(rand_bits);
 use Minion;
@@ -17,7 +18,7 @@ use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
 use Text::ParseWords;
-use MIME::Base64;
+
 use strict;
 use warnings;
 
@@ -947,6 +948,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
             app->log->trace("id: $elements[-1] -> $id");
 
+
             my $preview;
             if ($file_content{$filename} ne '' ) {
                 $preview = qq(
@@ -971,6 +973,8 @@ websocket '/filemanager/<game>-ws' => sub {
                );
             }
             else {
+            my $encoded_file_link = $path . '/' . $elements[-1];
+               $encoded_file_link = url_escape $encoded_file_link;
             $content .= qq(
                 <span class="col-md-4">
                     <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
@@ -984,7 +988,7 @@ websocket '/filemanager/<game>-ws' => sub {
                         <h5 class="offcanvas-title align-bottom" id="$id">
                         <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $elements[-1] </h5>
                         <button class="btn btn-outline-primary" type="submit" data-bs-dismiss="offcanvas"
-                                onclick="get_file('$path/$elements[-1]')">
+                                onclick="get_file('$encoded_file_link')">
                             download
                         </button>
                         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
@@ -1015,6 +1019,8 @@ websocket '/filemanager/<game>-ws' => sub {
         app->log->info("file download requested");
 
         my $file = $hash->{get_file} if ( $hash->{get_file} );
+           $file = url_unescape $file;
+
         app->log->info("file: $home_dir/$file");
 
         my @folders  =  (split '/', $file );
@@ -1035,14 +1041,51 @@ websocket '/filemanager/<game>-ws' => sub {
         my $remote = $ssh->{'link'}->make_remote_command($cmd);
         system "$remote | tar xvzf - -C tmp/$id  ";
 
-        #app->log->info("$ssh->{'link'}->error");
+        my $encoded = $id . '/' . $filename;
+           $encoded = b64_encode $encoded;
 
-        my $encoded = encode_base64("$id/$filename");
-;
         app->log->info("$encoded");
         $self->send( encode_json{ path => "download", filename => $encoded } ) ;
        # $self->send( $content ) if $content;
     };
+
+        my $upload_file = sub {
+        my ($c, $hash) = @_;
+
+        app->log->info("file upload requested");
+
+        my $file = $hash->{upload_file} if ( $hash->{upload_file} );
+        app->log->info("file: $home_dir/$file");
+
+        my @folders  =  (split '/', $file );
+        my $filename =  $folders[-1];
+           #$filename =~ s/ /_/g;
+        my $filepath = $file;
+           $filepath =~ s/[^\/]+$//;
+
+        my $id = '';
+        for my $i (0..10) {
+            $id .= chr(rand(25) + 97);
+        }
+        return;
+
+        # $Net::OpenSSH::debug = ~0;
+        my $path = path("tmp/$id")->make_path;
+
+        my $cmd = qq(cd "$home_dir$filepath"; tar czf - "$filename");
+        my $remote = $ssh->{'link'}->make_remote_command($cmd);
+        system "$remote | tar xvzf - -C tmp/$id  ";
+
+        #app->log->info("$ssh->{'link'}->error");
+
+        my $encoded = $id/$filename;
+           $encoded = b64_encode $encoded;
+
+        app->log->info("$encoded");
+
+        $self->send( encode_json{ path => "download", filename => $encoded } ) ;
+    };
+
 
     $self->on(json => sub {
         my ($c, $hash) = @_;
@@ -1052,7 +1095,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
          $browser->($c, $hash) if $hash->{base_dir};
          $get_file->($c, $hash) if $hash->{get_file};
-
+         $upload_file->($c, $hash) if $hash->{upload};
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
@@ -1098,7 +1141,7 @@ get '/download/:id' => sub {
 
 
    return unless ( $username );
-   $id = decode_base64($id);
+   $id = b64_decode $id;
 
     # Sanitise path to prevent /../ or /./ dots travelling outside tmp dir
     $id =~ s|/\.+/|/|g;
@@ -3724,8 +3767,14 @@ $(document).ready ( function () {
         socket.send(JSON.stringify({base_dir: msg}));
     };
     function get_file (msg) {
+        console.log(msg);
         $('#filemanager-content').prepend("Download is being prepared...");
         socket.send(JSON.stringify({get_file: msg}));
+    };
+    function upload_file (msg) {
+        var encoded = encodeURIComponent(msg);
+        console.log(encoded);
+        socket.send(JSON.stringify({upload_file: msg}));
     };
 
     </script>
