@@ -1100,6 +1100,9 @@ get '/download/:id' => sub {
    return unless ( $username );
    $id = decode_base64($id);
 
+    # Sanitise path to prevent /../ or /./ dots travelling outside tmp dir
+    $id =~ s|/\.+/|/|g;
+
    my $path = path("tmp/$id");
         app->log->info("download route: $id");
 
@@ -3656,6 +3659,12 @@ $(document).ready ( function () {
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       </div>
+
+<!-- filemanager notification -->
+        <div id='filemanager-notification' class="text-break container-sm text-break">
+            %# This is the filemanager-content output
+        </div>
+
 <!-- filemanager modal editor -->
         <div id='filemanager-editor' class="text-break container-sm text-break">
             %# This is the filemanager-content output
@@ -3665,8 +3674,6 @@ $(document).ready ( function () {
         <div id='filemanager-content' class="text-break container-sm text-break">
             %# This is the filemanager-content output
         </div>
-
-<!-- filemanager uploader -->
 
   </div>
 
@@ -3706,6 +3713,8 @@ $(document).ready ( function () {
                     link.href     = window.location.origin + "/" + data.path + "/" + data.filename;
                     console.log(link.href);
                     link.click();
+
+
                 };
             };
         };
@@ -3715,6 +3724,7 @@ $(document).ready ( function () {
         socket.send(JSON.stringify({base_dir: msg}));
     };
     function get_file (msg) {
+        $('#filemanager-content').prepend("Download is being prepared...");
         socket.send(JSON.stringify({get_file: msg}));
     };
 
