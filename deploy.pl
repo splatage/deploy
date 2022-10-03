@@ -863,15 +863,21 @@ websocket '/filemanager/<game>-ws' => sub {
         my $content;
         my %file_content;
 
-
         # Strip out any double dots
         $hash->{path} =~ s/\.*$//g;
         $path = $hash->{base_dir} if ( $hash->{base_dir} );
         app->log->debug("$game path: $path");
 
-        my $files = $ssh->{'link'}->capture("[ -d '$home_dir/$path' ] && cd '$home_dir/$path' && ls -lhQa --group-directories-first") ; #if $hash->{path};;
-        my $head  = $ssh->{'link'}->capture("[ -d '$home_dir/$path' ] && cd '$home_dir/$path' && find * -maxdepth 0 -type f -exec grep -IlH . {} + | xargs -d '\n' head -v -n 15 ");
-           $head =~ s/\n/<newline>/g;
+        my $ls_cmd      = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' && ls -lhQa --group-directories-first);
+        my $files       = $ssh->{'link'}->capture("$ls_cmd") ; #if $hash->{path};
+
+        my $file_cmd    = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' );
+           $file_cmd   .= qq(&& find * -maxdepth 0 -type f -exec grep -IlH . {} + );
+           $file_cmd   .= qq(| xargs -d '\n' head -v -n 10);
+
+        my $head        =  $ssh->{'link'}->capture("$file_cmd");
+           $head        =~ s/\n/<newline>/g;
+
            app->log->trace("$game heads: $head");
 
         my $num;
@@ -964,7 +970,7 @@ websocket '/filemanager/<game>-ws' => sub {
                 $icon = q(bi-folder-fill); $color = 'green';
                 $content .= qq(
                 <span class="col-md-4">
-                    <button class="btn" data-bs-target="#$id"
+                    <button class="btn" data-bs-target="#$id style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;"
                      type="submit" id="$id" value="$path/$elements[-1]" onclick="browser_path('$path/$elements[-1]')">
                     <i class="bi $icon" style="font-size: 1.75rem; color: $color;"></i>
                     $elements[-1]
@@ -978,19 +984,26 @@ websocket '/filemanager/<game>-ws' => sub {
             $content .= qq(
                 <span class="col-md-4">
                     <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
-                        aria-controls="$id">
+                        aria-controls="$id" style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;">
                     <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;"></i>
                     $elements[-1]
                     </button>
                   <div class="offcanvas offcanvas-start" style="width: 750px;" tabindex="-1" id="$id"
                         aria-labelledby="$id">
-                    <div class="offcanvas-header">
-                        <h5 class="offcanvas-title align-bottom" id="$id">
+                    <div class="offcanvas-header d-flex justify-content-between">
+                        <h5 class="offcanvas-title align-bottom flex-grow-1" id="$id">
                         <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $elements[-1] </h5>
-                        <button class="btn btn-outline-primary" type="submit" data-bs-dismiss="offcanvas"
+
+                        <button class="btn btn-sm btn-outline-danger m-1" type="button" data-bs-dismiss="offcanvas"
+                                onclick="delete_file('$encoded_file_link')">
+                            delete
+                        </button>
+
+                        <button class="btn btn-sm btn-outline-primary m-1" type="button" data-bs-dismiss="offcanvas"
                                 onclick="get_file('$encoded_file_link')">
                             download
                         </button>
+
                         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
                     </div>
                     <div class="offcanvas-body">
@@ -1007,7 +1020,30 @@ websocket '/filemanager/<game>-ws' => sub {
                     );
               }
         }
-        $content .= q(</div></div>);
+        $content .= q(
+            </div></div>
+            <div class="mt-3 shadow accordion" id="accordionExample">
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="headingOne">
+                        <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                          data-bs-target="#collapseOne" aria-expanded="true" aria-controls="collapseOne">
+                            upload files
+                        </button>
+                    </h2>
+                    <div id="collapseOne" class="accordion-collapse collapse" aria-labelledby="headingOne"
+                      data-bs-parent="#accordionExample">
+                        <div class="accordion-body bg-light ">
+                            <input type="file" id="files" name="files[]" multiple />
+                            <div id="drop_zone">
+                                drop<br>files<br>here
+                            </div>
+                            <output id="list"></output>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+
         $content = encode_json{ base_dir => $content };
         $self->send("$content");
     };
@@ -1086,6 +1122,27 @@ websocket '/filemanager/<game>-ws' => sub {
         $self->send( encode_json{ path => "download", filename => $encoded } ) ;
     };
 
+    my $delete_file = sub {
+        my ($c, $hash) = @_;
+
+        app->log->info("file delete requested");
+
+        my $file = $hash->{delete_file} if ( $hash->{delete_file} );
+           $file = url_unescape $file;
+
+        app->log->warn("delete file: $home_dir/$file");
+
+        my @folders  =  (split '/', $file );
+        my $filename =  $folders[-1];
+           #$filename =~ s/ /_/g;
+        my $filepath = $file;
+           $filepath =~ s/[^\/]+$//;
+
+        my $cmd = qq(cd "$home_dir$filepath"; rm "$filename");
+           $ssh->{'link'}->system($cmd);
+
+            $browser->();
+    };
 
     $self->on(json => sub {
         my ($c, $hash) = @_;
@@ -1095,6 +1152,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
          $browser->($c, $hash) if $hash->{base_dir};
          $get_file->($c, $hash) if $hash->{get_file};
+         $delete_file->($c, $hash) if $hash->{delete_file};
          $upload_file->($c, $hash) if $hash->{upload};
     });
 
@@ -2785,6 +2843,12 @@ html {
 
 }
 
+#drop_zone { border: 10px dashed #ccc; width: 100px; min-height: 100px; margin: auto; text-align: center;}
+#drop_zone.hover { border: 10px dashed #0c0; }
+#drop_zone img { display: block; margin: 10px auto; }
+#drop_zone p { margin: 10px; font-size: 14px; }
+
+
 </style>
 </head>
 
@@ -3679,7 +3743,7 @@ $(document).ready ( function () {
 
 <table id="holder">
   <tr>
-    <td>Drop files here</td>
+    <td>Drop<br>files<br>here</td>
   </tr>
   <tr>
     <td><ul id="fileList"></ul></td>
@@ -3768,8 +3832,15 @@ $(document).ready ( function () {
     };
     function get_file (msg) {
         console.log(msg);
-        $('#filemanager-content').prepend("Download is being prepared...");
         socket.send(JSON.stringify({get_file: msg}));
+        // alert("preparing to fetch...\n" + decodeURIComponent(msg));
+    };
+    function delete_file (msg) {
+        console.log(msg);
+        let text="delete\n" + decodeURIComponent(msg);
+        if (confirm(text) == true) {
+            socket.send(JSON.stringify({delete_file: msg}));
+        }
     };
     function upload_file (msg) {
         var encoded = encodeURIComponent(msg);
