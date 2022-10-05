@@ -8,9 +8,10 @@
     default_user        => 'minecraft',                      # Default SSH user to perform admin tasks
     ssh_master          => 'true',                           # Using SSH master socket for interface is faster
     minion_ssh_master   => 'false',                          # Is better to have own SSH socket for longer minion tasks
-    secret              => 'cantguessthissecret',            # Leave blank to regenerate a rendom secret each restart
+    secret              => 'cantguessthissecret',            # Leave blank to expire sessions each reload
     poll_interval       => '10',                             # Period in seconds to check logs over ssh
     max_upload_size     => '1024',                           # Max pload size in MB
+    session_time        => '12',                             # Session time in hours
 
     hypnotoad           => {
       # listen          => ['https://*:443?cert=/etc/tls/domain.crt&key=/etc/tls/domain.key'],

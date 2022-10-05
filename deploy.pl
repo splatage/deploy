@@ -209,7 +209,7 @@ foreach my $game (keys %{$game_settings}) {
 ##    Authentication
 ###########################################################
 
-app->sessions->default_expiration( 1 * 60 * 60 );
+app->sessions->default_expiration( $config->{'session_time'} * 60 * 60 );
 
 app->yancy->plugin(
     'Auth::Password' => {
