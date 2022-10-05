@@ -9,7 +9,8 @@
     ssh_master          => 'true',                           # Using SSH master socket for interface is faster
     minion_ssh_master   => 'false',                          # Is better to have own SSH socket for longer minion tasks
     secret              => 'cantguessthissecret',            # Leave blank to regenerate a rendom secret each restart
-    poll_interval       => '5',                              # period in seconds to check logs over ssh
+    poll_interval       => '10',                             # Period in seconds to check logs over ssh
+    max_upload_size     => '1024',                           # Max pload size in MB
 
     hypnotoad           => {
       # listen          => ['https://*:443?cert=/etc/tls/domain.crt&key=/etc/tls/domain.key'],

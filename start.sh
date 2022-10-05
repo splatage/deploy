@@ -35,6 +35,11 @@ function stop_mojo () {
     hypnotoad -s ${MOJO_APP}
 }
 
+function cleanup_ssh_master_sockets () {
+    rm .ssh_master*
+    killall ssh
+}
+
 function hot_restart_mojo () {
     hypnotoad ${MOJO_APP}
 }
@@ -53,7 +58,8 @@ case $1 in
     stop)
         stop_mojo
         stop_minions
-    ;;
+        cleanup_ssh_master_sockets 
+   ;;
     test)
         test
     ;;

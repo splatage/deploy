@@ -78,7 +78,7 @@ app->log->level($config->{'log_level'});
 
 ( $config->{"secret"} ) ? app->secrets([$config->{'secret'}]) : app->secrets([rand]);
 
-
+app->max_request_size($config->{'max_upload_size'} * 1024 * 1024);
 
 plugin 'RemoteAddr';
 
@@ -210,10 +210,6 @@ foreach my $game (keys %{$game_settings}) {
 ###########################################################
 
 app->sessions->default_expiration( 1 * 60 * 60 );
-my $salt = '';
-for my $i (0..15) {
-    $salt .= chr(rand(74) + 48);
-}
 
 app->yancy->plugin(
     'Auth::Password' => {
@@ -223,10 +219,7 @@ app->yancy->plugin(
         email_field     => 'email',
         password_field  => 'password',
         password_digest => {
-           #type => 'SHA-512'
-            type => 'Bcrypt',
-            cost => 12,
-            salt => $salt,
+           type => 'SHA-512'
         }
     }
 );
@@ -802,7 +795,6 @@ get '/node/:node' => sub ($c) {
 
     my $locks = getMinionLocks();
 
-
     $c->render(
         template    => 'node',
         network     => $network,
@@ -866,6 +858,7 @@ websocket '/filemanager/<game>-ws' => sub {
         # Strip out any double dots
         $hash->{path} =~ s/\.*$//g;
         $path = $hash->{base_dir} if ( $hash->{base_dir} );
+        my $encoded_path = url_escape $path;
         app->log->debug("$game path: $path");
 
         my $ls_cmd      = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' && ls -lhQa --group-directories-first);
@@ -899,7 +892,7 @@ websocket '/filemanager/<game>-ws' => sub {
         foreach ( @breadcrumbs ) {
             next if ( $_ =~ m/^$/ );
 
-            unless (  $_ eq $breadcrumbs[-1]  ) {
+            #unless (  $_ eq $breadcrumbs[-1]  ) {
                 $combined_crumbs .= '/' . $_;
                 $content .= qq(
                 <li class="breadcrumb-item text-primary"
@@ -907,12 +900,12 @@ websocket '/filemanager/<game>-ws' => sub {
                     $_
                 </li>
                 );
-            }
-            else {
-                $content .= qq(
-                <li class="breadcrumb-item text-muted">$_</li>
-                );
-            }
+         #   }
+         #  else {
+         #       $content .= qq(
+          #      <li class="breadcrumb-item text-muted">$_</li>
+          #      );
+          #  }
         }
 
         $content .= q(</ol> </nav><hr>);
@@ -923,6 +916,8 @@ websocket '/filemanager/<game>-ws' => sub {
             my $icon = q(bi-question-square);
             my @elements = quotewords( '\s+', 0, $line );
             my $filename = $elements[-1];
+            my $encoded_file_link = $path . '/' . $elements[-1];
+               $encoded_file_link = url_escape $encoded_file_link;
 
             if ( $line =~ m/[0-9]+[MKG]$/ ) { next }
             if ( $line =~ m/\."$/ ) { next }
@@ -954,7 +949,6 @@ websocket '/filemanager/<game>-ws' => sub {
 
             app->log->trace("id: $elements[-1] -> $id");
 
-
             my $preview;
             if ($file_content{$filename} ne '' ) {
                 $preview = qq(
@@ -979,8 +973,6 @@ websocket '/filemanager/<game>-ws' => sub {
                );
             }
             else {
-            my $encoded_file_link = $path . '/' . $elements[-1];
-               $encoded_file_link = url_escape $encoded_file_link;
             $content .= qq(
                 <span class="col-md-4">
                     <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
@@ -995,12 +987,12 @@ websocket '/filemanager/<game>-ws' => sub {
                         <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $elements[-1] </h5>
 
                         <button class="btn btn-sm btn-outline-danger m-1" type="button" data-bs-dismiss="offcanvas"
-                                onclick="delete_file('$encoded_file_link')">
+                                style="width: 100px !important;" onclick="delete_file('$encoded_file_link')">
                             delete
                         </button>
 
                         <button class="btn btn-sm btn-outline-primary m-1" type="button" data-bs-dismiss="offcanvas"
-                                onclick="get_file('$encoded_file_link')">
+                                style="width: 100px !important;" onclick="get_file('$encoded_file_link')">
                             download
                         </button>
 
@@ -1020,7 +1012,7 @@ websocket '/filemanager/<game>-ws' => sub {
                     );
               }
         }
-        $content .= q(
+        $content .= qq(
             </div></div>
             <div class="mt-3 shadow accordion" id="accordionExample">
                 <div class="accordion-item">
@@ -1033,15 +1025,20 @@ websocket '/filemanager/<game>-ws' => sub {
                     <div id="collapseOne" class="accordion-collapse collapse" aria-labelledby="headingOne"
                       data-bs-parent="#accordionExample">
                         <div class="accordion-body bg-light ">
-                            <input type="file" id="files" name="files[]" multiple />
-                            <div id="drop_zone">
-                                drop<br>files<br>here
-                            </div>
-                            <output id="list"></output>
+                            <hr>
+                              <form id="upload_form" enctype="multipart/form-data" method="post">
+                              <input name="folder" type="hidden" value="$encoded_path">
+                              <input type="file" name="file" id="file" onchange="uploadFile('$encoded_path')"><br>
+                              <progress id="progressBar" value="0" max="100" style="width:50%;"></progress>
+                              <p id="status"></p>
+                             <p id="loaded_n_total"></p>
+                           </form>
+                           <hr>
                         </div>
                     </div>
                 </div>
             </div>
+            <script> var here='$combined_crumbs'; <script>
         );
 
         $content = encode_json{ base_dir => $content };
@@ -1085,43 +1082,6 @@ websocket '/filemanager/<game>-ws' => sub {
        # $self->send( $content ) if $content;
     };
 
-        my $upload_file = sub {
-        my ($c, $hash) = @_;
-
-        app->log->info("file upload requested");
-
-        my $file = $hash->{upload_file} if ( $hash->{upload_file} );
-        app->log->info("file: $home_dir/$file");
-
-        my @folders  =  (split '/', $file );
-        my $filename =  $folders[-1];
-           #$filename =~ s/ /_/g;
-        my $filepath = $file;
-           $filepath =~ s/[^\/]+$//;
-
-        my $id = '';
-        for my $i (0..10) {
-            $id .= chr(rand(25) + 97);
-        }
-        return;
-
-        # $Net::OpenSSH::debug = ~0;
-        my $path = path("tmp/$id")->make_path;
-
-        my $cmd = qq(cd "$home_dir$filepath"; tar czf - "$filename");
-        my $remote = $ssh->{'link'}->make_remote_command($cmd);
-        system "$remote | tar xvzf - -C tmp/$id  ";
-
-        #app->log->info("$ssh->{'link'}->error");
-
-        my $encoded = $id/$filename;
-           $encoded = b64_encode $encoded;
-
-        app->log->info("$encoded");
-
-        $self->send( encode_json{ path => "download", filename => $encoded } ) ;
-    };
-
     my $delete_file = sub {
         my ($c, $hash) = @_;
 
@@ -1153,7 +1113,6 @@ websocket '/filemanager/<game>-ws' => sub {
          $browser->($c, $hash) if $hash->{base_dir};
          $get_file->($c, $hash) if $hash->{get_file};
          $delete_file->($c, $hash) if $hash->{delete_file};
-         $upload_file->($c, $hash) if $hash->{upload};
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
@@ -1471,41 +1430,81 @@ get '/log/:node/:game' => sub ($c) {
     );
 };
 
-get '/test' => sub ($c) {
-    my $game = $c->stash('game');
-    app->log->debug("upload window for $game");
 
-    $c->stash(
-        game => $game
+# Multipart upload handler
+post '/upload' => sub ($c) {
+
+    # Check file size
+    return $c->render(text => 'File is too big.', status => 200) if $c->req->is_limit_exceeded;
+    return $c->redirect_to($c->req->headers->referrer) unless my $file = $c->param('file');
+
+
+print Dumper($c->param());
+    my $size        = $file->size;
+    my $name        = $file->filename;
+    my $target_path = url_unescape $c->param('folder');
+
+    my $game  = (split '/', $target_path)[1];
+
+    #my $game        = $parse_path[1];
+    my $ip          = $c->remote_addr;
+    my $username    = $c->yancy->auth->current_user->{'username'};
+    my $is_admin    = $perms->{$username}{'admin'};
+    my $pool        = $perms->{$username}{'pool'};
+
+    unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
+        $c->flash( error => "you dont have permission to do that" );
+        app->log->warn("IDS: $username from $ip requested upload");
+        $c->redirect_to($c->req->headers->referrer);
+    };
+
+    app->log->warn("$username uploading $name $size to $target_path");
+
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        hash_ref    => 'true'
     );
 
-#    $c->render(
-#        template => 'uploader',
-#    );
+    my $sip = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $settings->{$game}{'store'},
+        hash_ref    => 'false'
+    );
+
+    my $store       = $settings->{$game}{'store'};
+    my $store_path  = $settings->{$game}{'store_path'};
+    my $store_user  = $settings->{$game}{'store_usr'};
+    my $home_dir    = $settings->{$game}{'store_path'};
+
+    my $id = '';
+    for my $i (0..10) {
+        $id .= chr(rand(25) + 97);
+    }
+
+    my $ssh = connectSSH( user => $store_user, ip => $sip, ssh_master => 'false' );
+    return 1 if $ssh->{'error'};
+
+        # $Net::OpenSSH::debug = ~0;
+    my $path = path("tmp/$id")->make_path;
+       $file->move_to( $path . '/' . $name );
+
+    my $cmd = qq( tar xvzf - -C "$store_path/$target_path" );
+        my $remote_cmd   = $ssh->{'link'}->make_remote_command($cmd);
+        my $combined_cmd = qq(cd "$path"; tar czf - "$name" | $remote_cmd );
+
+        system "$combined_cmd";
+
+        app->log->trace("cd $path; cd $path; tar czf - $name | ssh $cmd");
+        print "$combined_cmd";
+
+        $path->remove_tree({keep_root => 1}, "tmp/$id");
+
+        $c->render(text => "server received <b>$name</b><br><b>$size</b> bytes transfered to the <b>$game</b> staging area<br>");
 };
 
-websocket '/uploads' => sub {
-
-    my $c = shift;
-     my $game = $c->stash('game');
-
-    app->log->debug("upload websocket for $game open");
-
-    $c->on( json => sub {
-        my ($ws,$file_rh) = @_;
-        my $file = Mojo::Asset::File->new();
-        $file->add_chunk($file_rh->{contents})->move_to($file_rh->{name});
-        app->log->debug("hello $file_rh->{name}");
-        sleep 3;
-        $ws->send({json => {data => $file_rh->{name}}});
-    });
-
-    $c->on(finish => sub {
-        my ($ws,$code,$reason) = @_;
-        app->log->debug("upload webSocket closed with status $code.");
-    });
-
-} => 'save';
 
 any '*' => sub ($c) {
     my $url = $c->req->url->to_abs;
@@ -1517,7 +1516,6 @@ any '*' => sub ($c) {
 };
 
 websocket '/notify' => sub ($c) {
-
 
 
 };
@@ -2618,7 +2616,6 @@ sub bootStrap {
 }
 
 
-
 sub deployGame {
     my %args = (
         game => '',
@@ -2791,10 +2788,13 @@ __DATA__
         integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT"
         crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css">
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.1/jquery.min.js"></script>
+    <link rel="stylesheet" href="/style.css">
+
+
 <style>
 body  {
-    background-image: url("http://www.splatage.com/wp-content/uploads/2021/06/download-wallpaper-x-minecraft-backgroung-green-full-hd-p-hd-background-1478263362k8n4g.jpg");
+    background-image: url("/images/background.jpg");
     background-size: cover;
     background-repeat: repeat-x;
     background-attachment: fixed;
@@ -2843,11 +2843,6 @@ html {
 
 }
 
-#drop_zone { border: 10px dashed #ccc; width: 100px; min-height: 100px; margin: auto; text-align: center;}
-#drop_zone.hover { border: 10px dashed #0c0; }
-#drop_zone img { display: block; margin: 10px auto; }
-#drop_zone p { margin: 10px; font-size: 14px; }
-
 
 </style>
 </head>
@@ -2889,7 +2884,7 @@ html {
 <nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark ">
   <div class="container-fluid">
         <a class="navbar-brand" href="/">
-          <img src="http://www.splatage.com/wp-content/uploads/2021/06/logo.png" alt="" height="50">
+          <img src="/images/logo.png" alt="" height="50">
           <small><%= $username %></small>
        </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01"
@@ -2964,7 +2959,7 @@ html {
   <!-- Copyright -->
 </footer>
 
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.1/jquery.min.js"></script>
+
 <link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/themes/smoothness/jquery-ui.css">
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>
 
@@ -3043,18 +3038,18 @@ window.setTimeout(function() {
           <div class="media" >
             <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
               <img class="zoom align-self-top mr-3"
-                src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+                src="/images/mc_folders.png"
                 alt="Generic placeholder image" height="35">
               </image>
             </a>
             <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
               <img class="zoom align-self-top mr-3"
-                src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
+                src="/images/matrix_log.png"
                 alt="Generic placeholder image" height="35">
               </image>
             </a>
             <img class="zoom align-self-top mr-3"
-              src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
+              src="/images/creeper-server-icon.png"
               alt="Generic placeholder image" height="25">
               </h4> <%= $game %> </h4>
             </image>
@@ -3119,7 +3114,6 @@ window.setTimeout(function() {
 </html>
 
 
-
 @@ node.html.ep
 % layout 'template';
 
@@ -3140,8 +3134,7 @@ window.setTimeout(function() {
 
             <div class="media mt-2">
               <a href="/info/<%= $node %>" class="list-group-item-action list-group-item-light">
-                <img class="align-self-top mr-1 mt-2 mb-2"
-                  src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
+                <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png"
                   alt="Generic placeholder image" height="80">
                 </img>
                 <h3>
@@ -3162,19 +3155,16 @@ window.setTimeout(function() {
         <div class="col d-flex justify-content-start mb-2 shadow">
           <div class="media" >
             <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
-              <img class="zoom align-self-top mr-3"
-                src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+              <img class="zoom align-self-top mr-3" src="/images/mc_folders.png"
                 alt="Generic placeholder image" height="35">
               </image>
             </a>
             <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
-              <img class="zoom align-self-top mr-3"
-                src=" http://www.splatage.com/wp-content/uploads/2022/08/matrix_log.png"
+              <img class="zoom align-self-top mr-3" src="/images/matrix_log.png"
                 alt="Generic placeholder image" height="35">
               </image>
             </a>
-            <img class="zoom align-self-top mr-3"
-              src="http://www.splatage.com/wp-content/uploads/2021/06/creeper-server-icon.png"
+            <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png"
               alt="Generic placeholder image" height="25">
               </h4> <%= $game %> </h4>
             </image>
@@ -3261,7 +3251,7 @@ window.setTimeout(function() {
           <div class="media mt-2 mb-2">
 
             <img class="align-self-top mr-1 mt-2 mb-2"
-              src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
+              src="/images/application-server-.png"
               alt="Generic placeholder image" height="80">
                 <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
 
@@ -3295,7 +3285,7 @@ window.setTimeout(function() {
                            <span class="badge badge-primary text-dark">
                        <%= $game %></span>
                         <span style="float:right; mr-1" class="mr-1">
-                        <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
+                        <img src="/images/redX.png" alt="X" image" height="25" >
                        % }
                         </span>
 
@@ -3325,7 +3315,7 @@ window.setTimeout(function() {
 
           <div class="media mt-2">
             <img class="align-self-top mr-1 mt-2 mb-2"
-              src="http://www.splatage.com/wp-content/uploads/2022/08/application-server-.png"
+              src="/images/application-server-.png"
               alt="Generic placeholder image" height="80">
                 <a href="#" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
 
@@ -3342,7 +3332,7 @@ window.setTimeout(function() {
                          <%= $game %>
                        </span>
                        <span style="float:right; mr-1" class="mr-1">
-                         <img src="http://www.splatage.com/wp-content/uploads/2022/08/redX.png" alt="X" image" height="25" >
+                         <img src="/images/redX.png" alt="X" image" height="25" >
                        </span>
                      </a>
                    % }
@@ -3382,7 +3372,6 @@ window.setTimeout(function() {
       </div>
    </body>
 </html>
-
 
 
 @@ node_details.html.ep
@@ -3643,114 +3632,6 @@ window.setTimeout(function() {
 </html>
 
 
-@@ uploader.html.ep
-% layout 'template';
-
-%= stylesheet begin
-
-    table#holder {
-        border: 5px dashed #CCC;
-        width:400px;
-        font-family:Verdana;
-    }
-    table#holder tr:first-child {
-        height:50px;
-        text-align:center;
-    }
-    table#holder tr:last-child {
-        height:300px;
-        line-height: 50px;
-    }
-    table#holder li img {
-        height: 30px;
-    }
-
-% end
-
-%= javascript begin
-
-function transViaWS (url,files) {
-
-      console.log("inside the websocket block: ", url);
-
-      var ws     = new WebSocket(url);
-      var reader = new FileReader();
-      reader.fileName =  files.item(0).name;
-
-      var i = 0;
-
-      reader.onloadend = function(event) {
-          var contents = event.target.result;
-          var name     = event.target.fileName;
-          $('#fileList').text('Tranforming ' + name)
-          ws.send(
-                JSON.stringify( {'contents':contents, 'name': name} )
-          );
-          console.log(event.target.fileName);
-          i++;
-      };
-
-      reader.onprogress = function(data) {
-        if (data.lengthComputable){
-            var progress = parseInt( ((data.loaded / data.total) * 100), 10 );
-            console.log(progress);
-        }
-      }
-
-      ws.onopen = function () {
-          reader.readAsText( files.item(0) );
-      };
-
-      ws.onmessage = function (evt) {
-          var data = JSON.parse(evt.data);
-          console.log(i);
-          console.log(data);
-          if (i < files.length){
-            reader.fileName = files.item(i).name;
-            reader.readAsText( files.item(i) );
-          }
-          else {
-            ws.close();
-          }
-      };
-}
-
-
-% end
-
-%= javascript begin
-
-$(document).ready ( function () {
-    $('#holder').on({
-        'dragover dragenter': function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        },
-        'drop': function(e) {
-            // console.log(e.originalEvent, instanceof, DragEvent);
-            var dataTransfer = e.originalEvent.dataTransfer;
-            if (dataTransfer && dataTransfer.files.length) {
-                e.preventDefault();
-                e.stopPropagation();
-                files  = dataTransfer.files;
-                transViaWS("<%= url_for('save')->to_abs %>", files);
-            }
-        }
-    });
-});
-
-% end
-
-<table id="holder">
-  <tr>
-    <td>Drop<br>files<br>here</td>
-  </tr>
-  <tr>
-    <td><ul id="fileList"></ul></td>
-  </tr>
-</table>
-
-
 @@ filemanager.html.ep
 % layout 'template';
 
@@ -3760,9 +3641,9 @@ $(document).ready ( function () {
         <div class="alert alert-success alert-dismissible show" role="alert">
             <h4 class="alert-heading">
                        <img class="align-self-left mr-3"
-                        src="http://www.splatage.com/wp-content/uploads/2022/08/mc_folders.png"
+                        src="/images/mc_folders.png"
                         alt="Generic placeholder image" height="50">
-                    </image><%= $game %> file manager</h4>
+                    </image><%= $game %> staging area manager</h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
       </div>
@@ -3772,7 +3653,7 @@ $(document).ready ( function () {
             %# This is the filemanager-content output
         </div>
 
-<!-- filemanager modal editor -->
+<!-- filemanager editor -->
         <div id='filemanager-editor' class="text-break container-sm text-break">
             %# This is the filemanager-content output
         </div>
@@ -3781,8 +3662,8 @@ $(document).ready ( function () {
         <div id='filemanager-content' class="text-break container-sm text-break">
             %# This is the filemanager-content output
         </div>
-
   </div>
+
 
     <script type="text/javascript">
     var socket;
@@ -3797,8 +3678,6 @@ $(document).ready ( function () {
             ws_host = ws_host.replace(/https:/,"wss:");
             ws_host = ws_host + "-ws";
              socket = new WebSocket(ws_host);
-         //   socket = new WebSocket('<%= url_for('filemanager/' . $game . '-ws')->to_abs %>');
-         //   console.log(socket);
 
             socket.onclose = function(e) {
                 console.log('Socket is closed. Reconnect will be attempted in 5 seconds', e.reason);
@@ -3820,8 +3699,6 @@ $(document).ready ( function () {
                     link.href     = window.location.origin + "/" + data.path + "/" + data.filename;
                     console.log(link.href);
                     link.click();
-
-
                 };
             };
         };
@@ -3848,66 +3725,53 @@ $(document).ready ( function () {
         socket.send(JSON.stringify({upload_file: msg}));
     };
 
-     Element.prototype.remove = function() {
-	    this.parentElement.removeChild(this);
-	}
-	NodeList.prototype.remove = HTMLCollection.prototype.remove = function() {
-	    for(var i = 0, len = this.length; i < len; i++) {
-	        if(this[i] && this[i].parentElement) {
-	            this[i].parentElement.removeChild(this[i]);
-	        }
-	    }
-	}
-    var worker = new Worker('fileupload.js');
-    worker.onmessage = function(e) {
-	  var li = document.getElementById(escape(e.data.data));
-	  if (li)
-		  li.remove();
-	  else
-          alert(e.data.data);
-}
-worker.onerror =werror;
-function werror(e) {
-  console.log('ERROR: Line ', e.lineno, ' in ', e.filename, ': ', e.message);
- }
-function handleFileSelect(evt) {
- //evt.stopPropagation();
- evt.preventDefault();
 
- var files = evt.dataTransfer.files||evt.target.files;
- // FileList object.
- try {
- worker.postMessage({
- 'files' : files
- });
- } catch(e) {
-     alert('Can\'t spawn files to worker - '+e)
-     return
- }
- //Sending File list to worker
- // files is a FileList of File objects. List some properties.
- var output = [];
- for (var i = 0, f; f = files[i]; i++) {
-  output.push('<li id="',escape(f.name),'"><strong>', escape(f.name), '</strong> (', f.type || 'n/a', ') - ', f.size, ' bytes, last modified: ', f.lastModifiedDate ? f.lastModifiedDate.toLocaleDateString() : 'n/a', '</li>');
- }
- document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
+function _(el) {
+  return document.getElementById(el);
 }
 
-function handleDragOver(evt) {
- //evt.stopPropagation();
- evt.preventDefault();
- evt.dataTransfer.dropEffect = 'copy';
- // Explicitly show this is a copy.
- return false;
+function uploadFile(folder) {
+  var file = _("file").files[0];
+  // alert(file.name+" | "+file.size+" | "+file.type+" | "+folder);
+  var formdata = new FormData();
+  formdata.append("file", file);
+  formdata.append("folder", folder);
+  var ajax = new XMLHttpRequest();
+  ajax.upload.addEventListener("progress", progressHandler, false);
+  ajax.addEventListener("load", completeHandler, false);
+  ajax.addEventListener("error", errorHandler, false);
+  ajax.addEventListener("abort", abortHandler, false);
+  ajax.open("POST", "/upload");
+  ajax.send(formdata);
 }
 
-// Setup the dnd listeners.
-var dropZone = document.getElementById('drop_zone');
-dropZone.addEventListener('dragover', handleDragOver, false);
-dropZone.addEventListener('drop', handleFileSelect, false);
- document.getElementById('files').addEventListener('change', handleFileSelect, false);
+function progressHandler(event) {
+  _("loaded_n_total").innerHTML = "Uploaded " + event.loaded + " bytes of " + event.total;
+  var percent = (event.loaded / event.total) * 100;
+  _("progressBar").value = Math.round(percent);
+  _("status").innerHTML = Math.round(percent) + "% uploaded... please wait";
+  if ( percent == 100 ) {
+    _("status").innerHTML = "finished...moving to staging area";
+  }
+}
 
-    </script>
+function completeHandler(event) {
+  _("status").innerHTML = event.target.responseText;
+  _("progressBar").value = 0; //wil clear progress bar after successful upload
+  var decoded_folder = decodeURIComponent(folder);
+  // browser_path(decoded_folder);
+}
+
+function errorHandler(event) {
+  _("status").innerHTML = "Upload Failed";
+}
+
+function abortHandler(event) {
+  _("status").innerHTML = "Upload Aborted";
+}
+</script>
+
+
 </body>
 </html>
 
