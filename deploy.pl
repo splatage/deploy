@@ -1,5 +1,6 @@
 
 use v5.28;
+
 use Mojolicious::Lite -signatures;
 use Net::OpenSSH;
 use Mojo::mysql;
@@ -22,6 +23,7 @@ use Text::ParseWords;
 
 use strict;
 use warnings;
+no warnings qw(experimental::signatures);
 
 plugin 'StaticCache' => { even_in_dev => 1, max_age => 2592000 };
 
