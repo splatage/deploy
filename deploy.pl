@@ -1026,6 +1026,7 @@ websocket '/filemanager/<game>-ws' => sub {
                               <form id="upload_form" enctype="multipart/form-data" method="post">
                               <input name="folder" type="hidden" value="$encoded_path">
                               <input type="file" name="filelist" id="filelist" onchange="uploadFile('$encoded_path')" multiple/><br>
+                              <hr>
                               <!-- progress bars container -->
                                 <div id="dynamic_progress"></div>
                              <!-- <progress id="progressBar" value="0" max="100" style="width:50%;"></progress> -->
@@ -1033,7 +1034,6 @@ websocket '/filemanager/<game>-ws' => sub {
                               <p id="loaded_n_total"></p>
                               <p id="upload_results"></p>
                               <output></output>
-                              <hr>
                            </form>
                         </div>
                     </div>
@@ -1495,16 +1495,13 @@ post '/upload' => sub {
     my $cmd = qq( tar xvzf - -C "$store_path/$target_path" );
         my $remote_cmd   = $ssh->{'link'}->make_remote_command($cmd);
         my $combined_cmd = qq(cd "$path"; tar czf - "$name" | $remote_cmd );
-
         system "$combined_cmd";
 
         app->log->trace("cd $path; cd $path; tar czf - $name | ssh $cmd");
-        print "$combined_cmd";
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
 
         $size = format_bytes( $size );
-
         $c->render(text => "received: $name: $size<br>");
 };
 
@@ -2676,7 +2673,7 @@ sub deployGame {
 
     $cp_from = $settings->{$game}{'store_path'} . "/" . $game;
 
-    my $rsync_cmd  = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no ";
+    my $rsync_cmd  = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no --exclude='log/*";
        $rsync_cmd .= "-o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
     app->log->debug(" $rsync_cmd ");
 
@@ -3586,18 +3583,16 @@ function uploadFile(folder) {
         }, false);
 
         ajax.upload.addEventListener("load", function(e) {
-            console.log("server response: " + e.target.responseText);
             _(this.filesizeID).innerHTML = "finished";
-        }, false);
-
-        ajax.upload.addEventListener("error", function(e) {
-            console.log(this.filename + " upload failed");
-            _(this.filesizeID).innerHTML = "upload failed";
         }, false);
 
         ajax.upload.addEventListener("abort", function(e) {
             console.log(this.filename + " upload aborted");
             _(this.filesizeID).innerHTML = "upload aborted";
+        }, false);
+
+        ajax.addEventListener("error", function(e) {
+            alert("Error callback");
         }, false);
 
         ajax.open("POST", "/upload");
