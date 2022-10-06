@@ -868,7 +868,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
         my $file_cmd    = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' );
            $file_cmd   .= qq(&& find * -maxdepth 0 -type f -exec grep -IlH . {} + );
-           $file_cmd   .= qq(| xargs -d '\n' head -v -n 10);
+           $file_cmd   .= qq(| xargs -d '\n' head -v -n 15);
 
         my $head        =  $ssh->{'link'}->capture("$file_cmd");
            $head        =~ s/\n/<newline>/g;
@@ -894,20 +894,13 @@ websocket '/filemanager/<game>-ws' => sub {
         foreach ( @breadcrumbs ) {
             next if ( $_ =~ m/^$/ );
 
-            #unless (  $_ eq $breadcrumbs[-1]  ) {
-                $combined_crumbs .= '/' . $_;
-                $content .= qq(
-                <li class="breadcrumb-item text-primary"
-                     type="submit" onclick="browser_path('$combined_crumbs')">
-                    $_
-                </li>
-                );
-         #   }
-         #  else {
-         #       $content .= qq(
-          #      <li class="breadcrumb-item text-muted">$_</li>
-          #      );
-          #  }
+            $combined_crumbs .= '/' . $_;
+            $content .= qq(
+            <li class="breadcrumb-item text-primary"
+                 type="submit" onclick="browser_path('$combined_crumbs')">
+                $_
+            </li>
+            );
         }
 
         $content .= q(</ol> </nav><hr>);
@@ -2966,7 +2959,8 @@ html {
   </div>
   <!-- Copyright -->
 </footer>
-
+</body>
+</html>
 
 <link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/themes/smoothness/jquery-ui.css">
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>
@@ -2979,147 +2973,97 @@ html {
     integrity="sha384-7VPbUDkoPSGFnVtYi0QogXtr74QeVeeIs99Qfg5YCF+TidwNdjvaKZX19NZ/e6oz"
     crossorigin="anonymous"></script>
 
-<!--  dismiss spinner once page has loaded -->
+
 <script type="text/javascript">
-    $(document).ready(function() {
-        $('.spinner-hide').hide();
-    });
-</script>
-
-<!--  fade out alerts
-<script>
-    setTimeout(function() {
-        bootstrap.Alert.getOrCreateInstance(document.querySelector(".alert")).close();
-    }, 5000)
-</script>
--->
-
-<!--  fade out alerts -->
-<script>
-$(document).ready(function () {
-
-window.setTimeout(function() {
-    $(".alert-fadeout").fadeTo(1000, 0).slideUp(1000, function(){
-        $(this).remove();
-    });
-}, 5000);
+$(document).ready(function() {
+    $('.spinner-hide').hide();
+    window.setTimeout(function() {
+        $(".alert-fadeout").fadeTo(1000, 0).slideUp(1000, function() {
+            $(this).remove();
+        });
+    }, 5000);
 });
 </script>
-<!--  remember scroll position
-<script>
-    document.addEventListener("DOMContentLoaded", function (event) {
-        var scrollpos = sessionStorage.getItem('scrollpos');
-        if (scrollpos) {
-            window.scrollTo(0, scrollpos);
-            sessionStorage.removeItem('scrollpos');
-        }
-    });
-
-    window.addEventListener("beforeunload", function (e) {
-        sessionStorage.setItem('scrollpos', window.scrollY);
-    });
-</script>
--->
-</body>
-</html>
 
 
 @@ pool.html.ep
 % layout 'template';
 
-<meta http-equiv="refresh" content="10">
-<html>
-  <body>
-    <body class="m-0 border-0">
-      <div class="container-fluid text-left">
-
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <h4 class="alert-heading">my games: <%= $pool %> pool</h4>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-
-        % for my $game (sort keys %{$network->{'games'}} ) {
-        %# my $pool
-        %= next unless ( $network->{'games'}{$game}{'pool'} eq $pool );
-      <div class="row height: 40px">
-        <div class="col d-flex justify-content-start mb-2 shadow">
-          <div class="media" >
-            <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
-              <img class="zoom align-self-top mr-3"
-                src="/images/mc_folders.png"
-                alt="Generic placeholder image" height="35">
-              </image>
-            </a>
-            <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
-              <img class="zoom align-self-top mr-3"
-                src="/images/matrix_log.png"
-                alt="Generic placeholder image" height="35">
-              </image>
-            </a>
-            <img class="zoom align-self-top mr-3"
-              src="/images/creeper-server-icon.png"
-              alt="Generic placeholder image" height="25">
-              </h4> <%= $game %> </h4>
-            </image>
-          </div>
-        </div>
-
-        % if ( ! app->minion->lock($game, 0) or $locks->{$game} eq 'true' ) {
-          <div class="col d-flex justify-content-end mb-2 shadow">
-            <a class="ml-1 btn btn-sm btn-outline-danger
-               justify-end" href="/minion/locks"      role="button">task is running</a>
-          </div>
-          </div>
-        % next; }
-
-        % if ( defined $network->{'games'}{$game}{'pid'} ) {
-          <div class="col d-flex justify-content-end mb-2 shadow">
-            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
-              href="/store/<%= $game %>/<%= $game %>"     role="button">store</a>
-            <a class="ml-1 btn btn-sm btn-outline-info custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
-              href="/link/<%= $game %>/<%= $game %>"      role="button">link</a>
-            <a class="ml-1 btn btn-sm btn-outline-info custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
-              href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
-            <a class="ml-1 btn btn-sm btn-danger     custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
-              href="/halt/<%= $game %>/<%= $game %>"      role="button">halt</a>
-          </div>
-        % } else {
-          <div class="col d-flex justify-content-end mb-2 shadow">
-            <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
-              href="/deploy/<%= $game %>/<%= $game %>"    role="button">deploy</a>
-            <a class="ml-1 btn btn-sm btn-outline-info     custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
-              href="/drop/<%= $game %>/<%= $game %>"      role="button">drop</a>
-            <a class="ml-1 btn btn-sm btn-success    custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
-              href="/boot/<%= $game %>/<%= $game %>"      role="button">boot</a>
-          </div>
-      % }
-      </div>
-    % }
+<div class="container-fluid text-left">
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <h4 class="alert-heading">my games: <%= $pool %> pool </h4>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
+  % for my $game (sort keys %{$network->{'games'}} ) {
+  %# my $pool
+  %= next unless ( $network->{'games'}{$game}{'pool'} eq $pool );
+  <div class="row height: 40px">
+    <div class="col d-flex justify-content-start mb-2 shadow">
+      <div class="media">
+        <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
+          <img class="zoom align-self-top mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
+          </image>
+        </a>
+        <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+          <img class="zoom align-self-top mr-3" src="/images/matrix_log.png" alt="Generic placeholder image" height="35">
+          </image>
+        </a>
+        <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="25">
+        </h4><%= $game %> </h4>
+        </image>
+      </div>
+    </div>
+    % if ( ! app->minion->lock($game, 0) or $locks->{$game} eq 'true' ) {
+    <div class="col d-flex justify-content-end mb-2 shadow">
+      <a class="ml-1 btn btn-sm btn-outline-danger
+               justify-end" href="/minion/locks" role="button">task is running</a>
+    </div>
+  </div>
+  % next; }
+  % if ( defined $network->{'games'}{$game}{'pid'} ) {
+  <div class="col d-flex justify-content-end mb-2 shadow">
+    <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
+              href="/store/<%= $game %>/<%= $game %>" role="button">store</a>
+    <a class="ml-1 btn btn-sm btn-outline-info custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
+              href="/link/<%= $game %>/<%= $game %>" role="button">link</a>
+    <a class="ml-1 btn btn-sm btn-outline-info custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              href="/drop/<%= $game %>/<%= $game %>" role="button">drop</a>
+    <a class="ml-1 btn btn-sm btn-danger     custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
+              href="/halt/<%= $game %>/<%= $game %>" role="button">halt</a>
+  </div>
+  % } else {
+  <div class="col d-flex justify-content-end mb-2 shadow">
+    <a class="ml-1 btn btn-sm btn-outline-secondary  custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
+              href="/deploy/<%= $game %>/<%= $game %>" role="button">deploy</a>
+    <a class="ml-1 btn btn-sm btn-outline-info     custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              href="/drop/<%= $game %>/<%= $game %>" role="button">drop</a>
+    <a class="ml-1 btn btn-sm btn-success    custom
+              justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
+              href="/boot/<%= $game %>/<%= $game %>" role="button">boot</a>
+  </div>
+  % }
+</div>
+% }
 
 <script>
-    document.addEventListener("DOMContentLoaded", function (event) {
-        var scrollpos = sessionStorage.getItem('scrollpos');
-        if (scrollpos) {
-            window.scrollTo(0, scrollpos);
-            sessionStorage.removeItem('scrollpos');
-        }
-    });
+document.addEventListener("DOMContentLoaded", function(event) {
+    var scrollpos = sessionStorage.getItem('scrollpos');
+    if (scrollpos) {
+        window.scrollTo(0, scrollpos);
+        sessionStorage.removeItem('scrollpos');
+    }
+});
 
-    window.addEventListener("beforeunload", function (e) {
-        sessionStorage.setItem('scrollpos', window.scrollY);
-    });
+window.addEventListener("beforeunload", function(e) {
+    sessionStorage.setItem('scrollpos', window.scrollY);
+});
 </script>
-
-</body>
-</html>
 
 
 @@ node.html.ep
@@ -3130,17 +3074,13 @@ window.setTimeout(function() {
   <body>
     <body class="m-0 border-0">
       <div class="container-fluid text-left">
-
         <div class="alert alert-success alert-dismissible fade show" role="alert">
             <h4 class="alert-heading">manage games</h4>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
-
        % #for my $node ( sort keys %{$network->{nodes} ) {
           % #if ( $network->{nodes}{$node}{'status'} eq 'online' ) {
-
-
-            <div class="media mt-2">
+           <div class="media mt-2">
               <a href="/info/<%= $node %>" class="list-group-item-action list-group-item-light">
                 <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png"
                   alt="Generic placeholder image" height="80">
@@ -3150,12 +3090,9 @@ window.setTimeout(function() {
                 </h3>
               </a>
             </div>
-
-
         <div class="row height: 40px">
         <hr>
         <h5 class="text-success">games</h5>
-
         </div>
             % for my $game ( sort keys %{$network->{'games'}} ) {
             % next unless ( $network->{'games'}{$game}{'node'} eq $node );
@@ -3178,7 +3115,6 @@ window.setTimeout(function() {
             </image>
           </div>
         </div>
-
         % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
           <div class="col d-flex justify-content-end mb-2 shadow">
             <a class="ml-1 btn btn-sm btn-outline-danger
@@ -3186,7 +3122,6 @@ window.setTimeout(function() {
           </div>
           </div>
         % next; }
-
         % if ( defined $network->{'games'}{$game}{'pid'} ) {
           <div class="col d-flex justify-content-end mb-2 shadow">
             <a class="ml-1 btn btn-sm btn-outline-secondary  custom
@@ -3220,458 +3155,328 @@ window.setTimeout(function() {
   </div>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function (event) {
-        var scrollpos = sessionStorage.getItem('scrollpos');
-        if (scrollpos) {
-            window.scrollTo(0, scrollpos);
-            sessionStorage.removeItem('scrollpos');
-        }
-    });
+document.addEventListener("DOMContentLoaded", function(event) {
+    var scrollpos = sessionStorage.getItem('scrollpos');
+    if (scrollpos) {
+        window.scrollTo(0, scrollpos);
+        sessionStorage.removeItem('scrollpos');
+    }
+});
 
-    window.addEventListener("beforeunload", function (e) {
-        sessionStorage.setItem('scrollpos', window.scrollY);
-    });
+window.addEventListener("beforeunload", function(e) {
+    sessionStorage.setItem('scrollpos', window.scrollY);
+});
 </script>
-
-</body>
-</html>
 
 
 @@ index.html.ep
 % layout 'template';
 
-<html>
-
 <div class="alert alert-success alert-dismissible fade show" role="alert">
-  <h4 class="alert-heading"> <%= $title %> </h4>
+  <h4 class="alert-heading"><%= $title %> </h4>
   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
-
 <body class="m-0 border-0">
   <div class="container-fluid text-left">
     <div class="row justify-content-start">
-
-      % for my $node ( sort keys %{$network->{'nodes'}} ) {
-      % if ( $network->{'nodes'}{$node}{'status'} eq 'online' ) {
-
+    % for my $node ( sort keys %{$network->{'nodes'}} ) {
+        % if ( $network->{'nodes'}{$node}{'status'} eq 'online' ) {
         <div class="col-12 col-md-3 shadow bg-medium mt-4 mb-2 rounded">
-
-          <div class="media mt-2 mb-2">
-
-            <img class="align-self-top mr-1 mt-2 mb-2"
-              src="/images/application-server-.png"
-              alt="Generic placeholder image" height="80">
-                <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
-
-                  <%= $node %>
-
-
-                </a>
-                 <%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
-                 <%= int($network->{'nodes'}{$node}{'rss'}/1024 + 0.5) %>M
-             </img>
-
-<!--  games list  -->
-                <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
-                  % for my $game ( sort keys %{$network->{'games'}} ) {
-
-                  % next unless ( $network->{'games'}{$game}{'node'} eq $node );
-
-                    % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-
-                      <a href="/log/<%= $network->{'games'}{$game}{'node'} %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-success mb-1">
-                           <span class="badge badge-primary text-dark">
-                       <%= $game %></span>
-                        <span style="float:right; mr-1" class="mr-1 fs-6">
-                         <small>
-                           <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %>% |
-                           <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M
-                        </small>
-                     % } else {
-
-                     <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-danger mb-1">
-                           <span class="badge badge-primary text-dark">
-                       <%= $game %></span>
-                        <span style="float:right; mr-1" class="mr-1">
-                        <img src="/images/redX.png" alt="X" image" height="25" >
-                       % }
-                        </span>
-
-                      </a>
-            % }
-
-            </div>
-           </div>
-         </div>
-          % }
-         % }
-        <hr>
-
-
-<div class="alert alert-danger alert-dismissible fade show" role="alert">
-  <h4 class="alert-heading">offline nodes</h4>
-  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-</div>
-
-  <div class="container-fluid text-left">
-    <div class="row justify-content-start">
-
-
-      % for my $node (sort keys %{$network->{'nodes'}} ) {
-      % if ( $network->{'nodes'}{$node}{'status'} eq 'offline' ) {
-        <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">
-
-          <div class="media mt-2">
-            <img class="align-self-top mr-1 mt-2 mb-2"
-              src="/images/application-server-.png"
-              alt="Generic placeholder image" height="80">
-                <a href="#" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
-
-                <%= $node %>
-
-                </a>
-             </img>
-           <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
-                %for my $game ( sort keys %{$network->{'games'}} ) {
-                   % if ( $network->{'games'}{$game}{'node'} eq $node ) {
-
-                     <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
-                       <span class="badge badge-primary text-dark">
-                         <%= $game %>
-                       </span>
-                       <span style="float:right; mr-1" class="mr-1">
-                         <img src="/images/redX.png" alt="X" image" height="25" >
-                       </span>
-                     </a>
-                   % }
+        <div class="media mt-2 mb-2">
+          <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png" alt="Generic placeholder image" height="80">
+          <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
+          <%= $node %> </a><%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
+          <%= int($network->{'nodes'}{$node}{'rss'}/1024 + 0.5) %>M </img>
+          <!--  games list  -->
+          <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
+          % for my $game ( sort keys %{$network->{'games'}} ) {
+            % next unless ( $network->{'games'}{$game}{'node'} eq $node );
+            % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+            <a href="/log/<%= $network->{'games'}{$game}{'node'} %>/<%= $game %>"
+               class="fs-5 list-group-item-action list-group-item-success mb-1">
+              <span class="badge badge-primary text-dark"><%= $game %> </span>
+              <span style="float:right; mr-1" class="mr-1 fs-6">
+                <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % |
+                  <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M </small>
+                % } else {
+                <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-danger mb-1">
+                  <span class="badge badge-primary text-dark"><%= $game %> </span>
+                  <span style="float:right; mr-1" class="mr-1">
+                    <img src="/images/redX.png" alt="X" image" height="25">
                 % }
-            </div>
-           </div>
-         </div>
-         % }
-        % }
-        <hr>
-  </div>
-</body>
-</html>
-
-
-@@ files.html.ep
-% layout 'template';
-
-<!DOCTYPE html>
-
-<html>
-   <body class="m-0 border-0">
-      <div class="container-fluid text-left">
-        <div class="alert alert-success" role="alert">
-          <h4 class="alert-heading">game</h4>
+                  </span>
+                </a>
+                % }
+              </div>
         </div>
-
-        % my @files = @$files;
-
-        <h2> Files </h2>
-        <%= @files %> and directories
-
-        % foreach my $line (@files) {
-          <div> <%= $line %> </div>
-        % }
-        <hr>
       </div>
-   </body>
-</html>
+      % }
+    % }
+      <hr>
+      <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <h4 class="alert-heading">offline nodes</h4>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+      <div class="container-fluid text-left">
+        <div class="row justify-content-start">
+        % for my $node (sort keys %{$network->{'nodes'}} ) {
+          % if ( $network->{'nodes'}{$node}{'status'} eq 'offline' ) {
+          <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">
+            <div class="media mt-2">
+              <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png" alt="Generic placeholder image" height="80">
+              <a href="#" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6"><%= $node %> </a>
+              </img>
+              <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
+                %for my $game ( sort keys %{$network->{'games'}} ) {
+                % if ( $network->{'games'}{$game}{'node'} eq $node ) {
+                <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
+                  <span class="badge badge-primary text-dark"><%= $game %> </span>
+                  <span style="float:right; mr-1" class="mr-1">
+                    <img src="/images/redX.png" alt="X" image" height="25">
+                  </span>
+                </a>
+                % }
+              % }
+             </div>
+            </div>
+          </div>
+          % }
+        % }
+<hr>
+</div>
 
 
 @@ node_details.html.ep
 % layout 'template';
 
-<!DOCTYPE html>
-<html>
-    <body class="m-0 border-0">
-      <div class="container-fluid text-left">
-        <div class="alert alert-success" role="alert">
-          <h4 class="alert-heading"> debug info for <%= $node %></h4>
-        </div>
-<div class="accordion accordion-flush" id="accordionFlushExample">
-% my %numbers = (1 => 'One', 2 =>'Two', 3 => 'Three', 4 => 'Four', 5 => 'Five', 6 => 'Six', 7 => 'Seven', 8 => 'Eight', 9 => 'Nine');
-% my $count;
-% my %results = %$results;
-% my $show = 'show';
-% foreach my $title (sort keys %results) {
-%   my $info    =  $results{$title};
-%   my @lines   = split(/\n/, $info);
-%   $count++;
-%   $show = undef unless ($count eq 1);
+<div class="container-fluid text-left">
+  <div class="alert alert-success" role="alert">
+    <h4 class="alert-heading"> debug info for <%= $node %> </h4>
+  </div>
+  <div class="accordion accordion-flush" id="accordionFlushExample">
+    % my %numbers = (1 => 'One', 2 =>'Two', 3 => 'Three', 4 => 'Four', 5 => 'Five', 6 => 'Six', 7 => 'Seven', 8 => 'Eight', 9 => 'Nine');
+    % my $count;
+    % my %results = %$results;
+    % my $show = 'show';
+    % foreach my $title (sort keys %results) {
+        % my $info = $results{$title};
+        % my @lines = split(/\n/, $info);
+        % $count++;
+        % $show = undef unless ($count eq 1);
   <div class="accordion-item">
-    <h2 class="accordion-header" id="flush-heading<%= $numbers{$count} %>">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-        data-bs-target="#flush-collapse<%= $numbers{$count} %>" aria-expanded="false"
-        aria-controls="flush-collapse<%= $numbers{$count} %>">
-        <strong> <%= $title %> </strong> <hr>
-      </button>
-    </h2>
-    <div id="flush-collapse<%= $numbers{$count} %>" class="accordion-collapse collapse <%= $show %>"
-        aria-labelledby="flush-heading<%= $numbers{$count} %>"
-        data-bs-parent="#accordionFlushExample">
-      <div class="accordion-body">
-        <pre>
+      <h2 class="accordion-header" id="flush-heading<%= $numbers{$count} %>">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#flush-collapse<%= $numbers{$count} %>" aria-expanded="false" aria-controls="flush-collapse<%= $numbers{$count} %>">
+          <strong><%= $title %> </strong>
+          <hr>
+        </button>
+      </h2>
+      <div id="flush-collapse<%= $numbers{$count} %>" class="accordion-collapse collapse <%= $show %>" aria-labelledby="flush-heading<%= $numbers{$count} %>" data-bs-parent="#accordionFlushExample">
+        <div class="accordion-body">
+          <pre>
           % foreach my $out ( @lines ) {
           <%= $out %>
           % }
         </pre>
+        </div>
       </div>
     </div>
+    % }
   </div>
-
-% }
-
-
 </div>
-
-</div>
-</body>
-</html>
 
 
 @@ login.html.ep
 % layout 'template';
 
-<html>
-    <body class="m-0 border-0 mt-5"
-        style="background-size: cover; background-image: url('https://cdn.mos.cms.futurecdn.net/52K7sgnQLSJ8ggfyfvz9yB-970-80.jpg.webp');">
-      <div class="container-fluid text-left bg-opacity-10" style="--bs-bg-opacity: .10;">
-        %= $c->yancy->auth->login_form
-      </div>
-    </body>
-</html>
+<body class="m-0 border-0 mt-5" style="background-size: cover; background-image: url('https://cdn.mos.cms.futurecdn.net/52K7sgnQLSJ8ggfyfvz9yB-970-80.jpg.webp');">
+  <div class="container-fluid text-left bg-opacity-10" style="--bs-bg-opacity: .10;">
+  %= $c->yancy->auth->login_form
+  </div>
+</body>
 
 
 @@ logfile.html.ep
 % layout 'template';
 
-<html>
-    <body class="m-0 border-0">
-      <div class="container-fluid text-left">
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <h4 class="alert-heading">server logfile</h4>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-      </div>
-
-        <div id='command-content' class="text-wrap container-sm text-break">
-            %# This is the command output
-        </div>
-
-        <!-- /serverlog/:task   -->
-        <div class="d-grid gap-2 d-md-block">
-            <a class="btn btn-outline-warning" href="/serverlog/clear" role="button">clear</a>
-            <a class="btn btn-outline-success" href="/serverlog/info" role="button">info</a>
-            <a class="btn btn-outline-success" href="/serverlog/debug" role="button">debug</a>
-            <a class="btn btn-outline-success" href="/serverlog/trace" role="button">trace</a>
-        </div>
+<div class="container-fluid text-left">
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <h4 class="alert-heading">server logfile</h4>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
-    <script type="text/javascript">
-    var socket;
-    var ws_host;
+</div>
+<div id='command-content' class="text-wrap container-sm text-break"> </div>
+<!-- /serverlog/:task   -->
+<div class="d-grid gap-2 d-md-block">
+  <a class="btn btn-outline-warning" href="/serverlog/clear" role="button">clear</a>
+  <a class="btn btn-outline-success" href="/serverlog/info" role="button">info</a>
+  <a class="btn btn-outline-success" href="/serverlog/debug" role="button">debug</a>
+  <a class="btn btn-outline-success" href="/serverlog/trace" role="button">trace</a>
+</div>
 
-    $(document).ready(function () {
-        connect();
+<script type="text/javascript">
+var socket;
+var ws_host;
 
-        function connect() {
-            ws_host = window.location.href;
-            ws_host = ws_host.replace(/http:/,"ws:");
-            ws_host = ws_host.replace(/https:/,"wss:");
-            ws_host = ws_host + "-ws";
-            socket = new WebSocket(ws_host);
+$(document).ready(function() {
+    connect();
 
-            socket.onclose = function(e) {
-                console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
-                setTimeout(function() {
-                    connect();
-                }, 1000);
-            };
+    function connect() {
+        ws_host = window.location.href;
+        ws_host = ws_host.replace(/http:/, "ws:");
+        ws_host = ws_host.replace(/https:/, "wss:");
+        ws_host = ws_host + "-ws";
+        socket = new WebSocket(ws_host);
 
-            socket.onmessage = function (msg) {
-                $('#command-content').prepend(msg.data);
-            };
+        socket.onclose = function(e) {
+            console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+            setTimeout(function() {
+                connect();
+            }, 1000);
         };
 
-        function send(e) {
-            if (e.keyCode !== 13) {
-                return false;
-            }
-            var cmd = document.getElementById('cmd').value;
-            document.getElementById('cmd').value = '';
-            console.log('send', cmd);
-            socket.send(JSON.stringify({cmd: cmd}));
+        socket.onmessage = function(msg) {
+            $('#command-content').prepend(msg.data);
         };
+    };
+
+    function send(e) {
+        if (e.keyCode !== 13) {
+            return false;
+        }
+        var cmd = document.getElementById('cmd').value;
+        document.getElementById('cmd').value = '';
+        console.log('send', cmd);
+        socket.send(JSON.stringify({
+            cmd: cmd
+        }));
+    };
 
     document.getElementById('cmd').addEventListener('keypress', send);
     document.getElementById('cmd').focus();
-    } );
-    </script>
-</body>
-</html>
+});
+</script>
 
 
 @@ gamelog.html.ep
 % layout 'template';
 
-<html>
-    <body class="m-0 border-0">
-      <div class="container-fluid text-left">
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <h4 class="alert-heading">command console: <%= $game %> on <%= $node %></h4>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-        <div id='command-content' class="text-wrap container-sm text-break">
-            %# This is the command output
-        </div>
+<div class="container-fluid text-left">
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <h4 class="alert-heading">command console: <%= $game %> on <%= $node %> </h4>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+  <div id='command-content' class="text-wrap container-sm text-break"> </div>
+</div>
+<div class="input-group input-group-sm mb-3">
+  <button class="btn btn-primary" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasExample" aria-controls="offcanvasExample"> Options </button>
+  <!-- Side Panel -->
+  <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="offcanvasExample" aria-labelledby="offcanvasExampleLabel">
+    <div class="offcanvas-header">
+      <h5 class="offcanvas-title" id="offcanvasExampleLabel">Control Options</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
     </div>
-<!--    <div class="input-group mb-2 container bg-secondary shadow-lg bg-body rounded"> -->
-    <div class="input-group input-group-sm mb-3">
+    <div class="offcanvas-body">
+    % if (app->minion->lock($game, 0)) {
+    <h6 class="mt-3">storage</h6>
+      <hr>
+      <div class="list-group">
+        <a href="/store/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">store </a>
+        <a href="/deploy/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">deploy </a>
+      </div>
+      <h6 class="mt-3">network</h6>
+      <hr>
+      <div class="list-group">
+        <a href="/drop/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">drop </a>
+        <a href="/deploy/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">link </a>
+      </div>
+      <h6 class="mt-3">power</h6>
+      <hr>
+      <div class="list-group">
+        <a href="/halt/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">halt </a>
+        <a href="/boot/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">boot </a>
+      </div>
+      <h6 class="mt-3">admin</h6>
+      <hr>
+      <div class="list-group">
+        <a href="/bootstrap/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">bootstrap </a>
+      </div>
+      % } else {
+      <div class="col d-flex justify-content-end mb-2 shadow">
+        <a class="ml-1 btn btn-sm btn-outline-danger
+                        justify-end" href="/minion/locks" role="button">task is running</a>
+      </div>
+      % }
+    </div>
+  </div>
+  <!-- Console Form -->
+  <span class="input-group-text" id="inputGroup-sizing-sm">
+    <b><%= $game %>@<%= $node %> :~ </small>
+    </b>
+  </span>
+  <input type="text" autocomplete="off" class="form-control" id="cmd" placeholder="console" aria-label="Sizing example input" aria-describedby="inputGroup-sizing-sm">
+</div>
 
-        <button class="btn btn-primary" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasExample" aria-controls="offcanvasExample">
-            Options
-        </button>
+<script type="text/javascript">
+var socket;
+var ws_host;
 
-<!-- Side Panel -->
-        <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="offcanvasExample" aria-labelledby="offcanvasExampleLabel">
-            <div class="offcanvas-header">
-                <h5 class="offcanvas-title" id="offcanvasExampleLabel">Control Options</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-            </div>
-            <div class="offcanvas-body">
+$(document).ready(function() {
+    connect();
 
-             % if (app->minion->lock($game, 0)) {
+    function connect() {
+        ws_host = window.location.href;
+        ws_host = ws_host.replace(/http:/, "ws:");
+        ws_host = ws_host.replace(/https:/, "wss:");
+        ws_host = ws_host + "-ws";
+        socket = new WebSocket(ws_host);
 
-                <h6 class="mt-3">storage</h6>
-                <hr>
-                <div class="list-group">
-                    <a href="/store/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">store</a>
-                    <a href="/deploy/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">deploy</a>
-                </div>
-
-                <h6 class="mt-3">network</h6>
-                <hr>
-                <div class="list-group">
-                    <a href="/drop/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">drop</a>
-                    <a href="/deploy/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-secondary">link</a>
-                </div>
-
-                <h6 class="mt-3">power</h6>
-                <hr>
-                <div class="list-group">
-                    <a href="/halt/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-dark">halt</a>
-                    <a href="/boot/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-dark">boot</a>
-                </div>
-
-                <h6 class="mt-3">admin</h6>
-                <hr>
-                <div class="list-group">
-                    <a href="/bootstrap/<%= $game %>/<%= $node %>"
-                        class="list-group-item list-group-item-action list-group-item-dark">bootstrap</a>
-                </div>
-
-                % } else {
-                    <div class="col d-flex justify-content-end mb-2 shadow">
-                        <a class="ml-1 btn btn-sm btn-outline-danger
-                        justify-end" href="/minion/locks"      role="button">task is running</a>
-                    </div>
-                % }
-            </div>
-
-        </div>
-<!-- Console Form -->
-            <span class="input-group-text" id="inputGroup-sizing-sm"><b><%= $game %>@<%= $node %> :~ </small></b></span>
-            <input type="text" autocomplete="off" class="form-control" id="cmd" placeholder="console"
-              aria-label="Sizing example input" aria-describedby="inputGroup-sizing-sm">
-        </div>
-</body>
-
-<!-- $('html, body').animate({scrollTop: $(document).height()}, 'slow'); -->
-
-    <script type="text/javascript">
-    var socket;
-    var ws_host;
-
-    $(document).ready(function () {
-        connect();
-
-        function connect() {
-            ws_host = window.location.href;
-            ws_host = ws_host.replace(/http:/,"ws:");
-            ws_host = ws_host.replace(/https:/,"wss:");
-            ws_host = ws_host + "-ws";
-            socket = new WebSocket(ws_host);
-
-            socket.onclose = function(e) {
-                console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
-                setTimeout(function() {
-                    connect();
-                }, 1000);
-            };
-
-            socket.onmessage = function (msg) {
-                $('#command-content').prepend(msg.data);
-            };
+        socket.onclose = function(e) {
+            console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+            setTimeout(function() {
+                connect();
+            }, 1000);
         };
 
-        function send(e) {
-            if (e.keyCode !== 13) {
-                return false;
-            }
-            var cmd = document.getElementById('cmd').value;
-            document.getElementById('cmd').value = '';
-            console.log('send', cmd);
-            socket.send(JSON.stringify({cmd: cmd}));
+        socket.onmessage = function(msg) {
+            $('#command-content').prepend(msg.data);
         };
+    };
+
+    function send(e) {
+        if (e.keyCode !== 13) {
+            return false;
+        }
+        var cmd = document.getElementById('cmd').value;
+        document.getElementById('cmd').value = '';
+        console.log('send', cmd);
+        socket.send(JSON.stringify({
+            cmd: cmd
+        }));
+    };
 
     document.getElementById('cmd').addEventListener('keypress', send);
     document.getElementById('cmd').focus();
-    } );
-    </script>
-</html>
+});
+</script>
 
 
 @@ filemanager.html.ep
 % layout 'template';
-
-<html>
-    <body class="m-0 border-0">
-      <div class="container-fluid text-left">
-        <div class="alert alert-success alert-dismissible show" role="alert">
-            <h4 class="alert-heading">
-                       <img class="align-self-left mr-3"
-                        src="/images/mc_folders.png"
-                        alt="Generic placeholder image" height="50">
-                    </image><%= $game %> staging area manager</h4>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-      </div>
-
-<!-- filemanager notification -->
-        <div id='filemanager-notification' class="text-break container-sm text-break">
-            %# This is the filemanager-content output
-        </div>
-
-<!-- filemanager editor -->
-        <div id='filemanager-editor' class="text-break container-sm text-break">
-            %# This is the filemanager-content output
-        </div>
-
-<!-- filemanager content -->
-        <div id='filemanager-content' class="text-break container-sm text-break">
-            %# This is the filemanager-content output
-        </div>
+<div class="container-fluid text-left">
+  <div class="alert alert-success alert-dismissible show" role="alert">
+    <h4 class="alert-heading">
+      <img class="align-self-left mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="50">
+      </image><%= $game %> staging area manager
+    </h4>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
-
+</div>
+<!-- filemanager notification -->
+<div id='filemanager-notification' class="text-break container-sm text-break"></div>
+<!-- filemanager editor -->
+<div id='filemanager-editor' class="text-break container-sm text-break"></div>
+<!-- filemanager content -->
+<div id='filemanager-content' class="text-break container-sm text-break"></div>
 
 <script>
 var socket;
@@ -3812,6 +3617,4 @@ function formatBytes(bytes, decimals = 2) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 </script>
-</body>
-</html>
 
