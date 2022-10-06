@@ -1458,7 +1458,7 @@ print Dumper($c->param());
         $c->redirect_to($c->req->headers->referrer);
     };
 
-    app->log->warn("$username uploading $name $size to $target_path");
+    app->log->info("$username uploading $name $size to $target_path");
 
     my $settings    = readFromDB(
         table       => 'games',
@@ -1758,7 +1758,7 @@ sub readLog {
     unless ( $reset =~ /There is a screen/ ) {
         $args{'line_index'} = 1;
         $args{'content'} = '';
-        app->log->warn("$game screen is offline. $reset");
+        app->log->debug("$game screen is offline. $reset");
         $method = 'screenlog';
        #return \%args;
     }
