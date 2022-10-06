@@ -12,6 +12,7 @@ use Mojo::File  qw(path );
 use Mojo::Util qw(b64_encode b64_decode url_escape url_unescape);
 use Digest::Bcrypt;
 use Data::Entropy::Algorithms qw(rand_bits);
+use Number::Bytes::Human qw(format_bytes parse_bytes);
 use Minion;
 use Data::Dumper qw( Dumper );
 use POSIX        qw( strftime );
@@ -225,8 +226,8 @@ app->yancy->plugin(
 );
 
 group {
-    my $route = under '/minion' => sub ($c) {
-
+    my $route = under '/minion' => sub {
+    my $c  = shift;
        my $name = $c->yancy->auth->current_user || '';
         if ( $name ne '' ) {
             my $ip          = $c->remote_addr;
@@ -247,7 +248,8 @@ group {
 };
 
 group {
-    my $route = under '/status' => sub ($c) {
+    my $route = under '/status' => sub {
+        my $c  = shift;
         my $name = $c->yancy->auth->current_user || '';
         if ( $name ne '' ) {
             return 1;
@@ -261,7 +263,8 @@ group {
 };
 
 
-under sub ($c) {
+under sub {
+    my $c  = shift;
     # Authenticated
     my $name = $c->yancy->auth->current_user || '';
     if ( $name ne '' ) {
@@ -288,8 +291,8 @@ under sub ($c) {
 ###########################################################
 
 
-get '/update/:game/:node' => sub ($c) {
-
+get '/update/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'update';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -329,8 +332,8 @@ app->minion->add_task(
 
 ## BootStrap   #################################################
 
-get '/bootstrap/:game/:node' => sub ($c) {
-
+get '/bootstrap/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'bootstrap';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -395,8 +398,8 @@ app->minion->add_task(
 
 ## Boot   #################################################
 
-get '/boot/:game/:node' => sub ($c) {
-
+get '/boot/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'boot';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -447,8 +450,8 @@ app->minion->add_task(
 
 ## Halt ###################################################
 
-get '/halt/:game/:node' => sub ($c) {
-
+get '/halt/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'halt';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -490,8 +493,8 @@ app->minion->add_task(
 
 ## Deploy #################################################
 
-get '/deploy/:game/:node' => sub ($c) {
-
+get '/deploy/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'deploy';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -531,8 +534,8 @@ app->minion->add_task(
 
 ## Store #################################################
 
-get '/store/:game/:node' => sub ($c) {
-
+get '/store/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'store';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -573,9 +576,8 @@ app->minion->add_task(
 
 ## Link ###################################################
 
-get '/link/:game/:node' => sub ($c) {
-
-
+get '/link/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'link';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -614,8 +616,8 @@ app->minion->add_task(
 
 ## Drop #################################################
 
-get '/drop/:game/:node' => sub ($c) {
-
+get '/drop/:game/:node' => sub {
+    my $c  = shift;
     my $task        = 'drop';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -656,8 +658,8 @@ app->minion->add_task(
 ##          Routing
 ###########################################################
 
-get '/' => sub ($c) {
-
+get '/' => sub {
+    my $c  = shift;
     my $network = checkIsOnline(
         list_by => 'node',
         node    => '',
@@ -685,8 +687,8 @@ get '/' => sub ($c) {
     $c->render( template => 'index' );
 };
 
-get '/pool' => sub ($c) {
-
+get '/pool' => sub {
+    my $c  = shift;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
     my $pool        = $perms->{$username}{'pool'};
@@ -722,8 +724,8 @@ get '/pool' => sub ($c) {
     );
 };
 
-get '/info/:node/' => sub ($c) {
-
+get '/info/:node/' => sub {
+    my $c  = shift;
     my $template    = 'node_details';
     my $node        = $c->stash('node');
 
@@ -749,8 +751,8 @@ get '/info/:node/' => sub ($c) {
     $c->render( template => $template );
 };
 
-get '/node/:node' => sub ($c) {
-
+get '/node/:node' => sub {
+    my $c  = shift;
     my $node        = $c->stash('node');
 
     my $network     = checkIsOnline(
@@ -856,7 +858,7 @@ websocket '/filemanager/<game>-ws' => sub {
         my %file_content;
 
         # Strip out any double dots
-        $hash->{path} =~ s/\.*$//g;
+        $hash->{path} =~ s/\.*$//g if $hash->{path};
         $path = $hash->{base_dir} if ( $hash->{base_dir} );
         my $encoded_path = url_escape $path;
         app->log->debug("$game path: $path");
@@ -877,11 +879,11 @@ websocket '/filemanager/<game>-ws' => sub {
         foreach ( split '==> ', $head ) {
         ++$num;
          my ($filename, $line_content) =  (split ' <==', $_ );
+            next unless $filename;
             $file_content{$filename}   =  $line_content;
             $file_content{$filename}   =~ s/<newline>/\n/g;
             $file_content{$filename}   =~ s/>/\&gt;/g;
             $file_content{$filename}   =~ s/</\&lt;/g;
-
         }
 
         $content  = q(<nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"><ol class="breadcrumb">);
@@ -949,8 +951,8 @@ websocket '/filemanager/<game>-ws' => sub {
 
             app->log->trace("id: $elements[-1] -> $id");
 
-            my $preview;
-            if ($file_content{$filename} ne '' ) {
+            my $preview = 'file binary or preview unavailable';
+            if ( defined $file_content{$filename} ) {
                 $preview = qq(
                     <h6>preview:</h6>
                     <div class="bg-success p-1 text-dark bg-opacity-10 rounded border border-success shadow"
@@ -1028,12 +1030,16 @@ websocket '/filemanager/<game>-ws' => sub {
                             <hr>
                               <form id="upload_form" enctype="multipart/form-data" method="post">
                               <input name="folder" type="hidden" value="$encoded_path">
-                              <input type="file" name="file" id="file" onchange="uploadFile('$encoded_path')"><br>
-                              <progress id="progressBar" value="0" max="100" style="width:50%;"></progress>
+                              <input type="file" name="filelist" id="filelist" onchange="uploadFile('$encoded_path')" multiple/><br>
+                              <!-- progress bars container -->
+                                <div id="dynamic_progress"></div>
+                             <!-- <progress id="progressBar" value="0" max="100" style="width:50%;"></progress> -->
                               <p id="status"></p>
-                             <p id="loaded_n_total"></p>
+                              <p id="loaded_n_total"></p>
+                              <p id="upload_results"></p>
+                              <output></output>
+                              <hr>
                            </form>
-                           <hr>
                         </div>
                     </div>
                 </div>
@@ -1122,8 +1128,8 @@ websocket '/filemanager/<game>-ws' => sub {
     $browser->();
 };
 
-get '/filemanager/:game'  => sub ($c) {
-
+get '/filemanager/:game'  => sub {
+    my $c  = shift;
     my $template    = 'filemanager';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -1178,8 +1184,8 @@ get '/download/:id' => sub {
 };
 
 
-get '/reload' => sub ($c) {
-
+get '/reload' => sub {
+    my $c  = shift;
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
@@ -1200,8 +1206,8 @@ get '/reload' => sub ($c) {
 };
 
 
-get '/logfile' => sub ($c) {
-
+get '/logfile' => sub {
+    my $c  = shift;
     my $template    = 'logfile';
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
@@ -1279,8 +1285,8 @@ websocket '/logfile-ws' => sub {
 };
 
 
-get '/serverlog/:task' => sub ($c) {
-
+get '/serverlog/:task' => sub {
+    my $c  = shift;
     my $task        = $c->stash->{'task'};
     my $ip          = $c->remote_addr;
     my $username    = $c->yancy->auth->current_user->{'username'};
@@ -1399,8 +1405,8 @@ websocket '/log/:node/<game>-ws' => sub {
 };
 
 
-get '/log/:node/:game' => sub ($c) {
-
+get '/log/:node/:game' => sub {
+    my $c  = shift;
     my $template    = 'gamelog';
     my $game        = $c->stash('game');
     my $node        = $c->stash('node');
@@ -1432,14 +1438,14 @@ get '/log/:node/:game' => sub ($c) {
 
 
 # Multipart upload handler
-post '/upload' => sub ($c) {
-
+post '/upload' => sub {
+    my $c  = shift;
     # Check file size
     return $c->render(text => 'File is too big.', status => 200) if $c->req->is_limit_exceeded;
     return $c->redirect_to($c->req->headers->referrer) unless my $file = $c->param('file');
 
 
-print Dumper($c->param());
+    # print Dumper($c->param());
     my $size        = $file->size;
     my $name        = $file->filename;
     my $target_path = url_unescape $c->param('folder');
@@ -1502,11 +1508,14 @@ print Dumper($c->param());
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
 
-        $c->render(text => "server received <b>$name</b><br><b>$size</b> bytes transfered to the <b>$game</b> staging area<br>");
+        $size = format_bytes( $size );
+
+        $c->render(text => "received: $name: $size<br>");
 };
 
 
-any '*' => sub ($c) {
+any '*' => sub {
+    my $c  = shift;
     my $url = $c->req->url->to_abs;
     my $ip  = $c->remote_addr;
     my $user = $c->yancy->auth->current_user->{'username'};
@@ -1515,8 +1524,8 @@ any '*' => sub ($c) {
     $c->redirect_to("/");
 };
 
-websocket '/notify' => sub ($c) {
-
+websocket '/notify' => sub {
+    my $c  = shift;
 
 };
 
@@ -3170,7 +3179,7 @@ window.setTimeout(function() {
           </div>
         </div>
 
-        % if ( ! app->minion->lock($game, 0) or $locks->{$game} eq 'true' ) {
+        % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
           <div class="col d-flex justify-content-end mb-2 shadow">
             <a class="ml-1 btn btn-sm btn-outline-danger
                justify-end" href="/minion/locks"      role="button">task is running</a>
@@ -3664,113 +3673,145 @@ window.setTimeout(function() {
   </div>
 
 
-    <script type="text/javascript">
-    var socket;
-    var ws_host;
+<script>
+var socket;
+var ws_host;
 
-    $(document).ready(function () {
-        connect();
+$(document).ready(function() {
+    connect();
 
-        function connect() {
-            ws_host = window.location.href;
-            ws_host = ws_host.replace(/http:/,"ws:");
-            ws_host = ws_host.replace(/https:/,"wss:");
-            ws_host = ws_host + "-ws";
-             socket = new WebSocket(ws_host);
+    function connect() {
+        ws_host = window.location.href;
+        ws_host = ws_host.replace(/http:/, "ws:");
+        ws_host = ws_host.replace(/https:/, "wss:");
+        ws_host = ws_host + "-ws";
+        socket = new WebSocket(ws_host);
 
-            socket.onclose = function(e) {
-                console.log('Socket is closed. Reconnect will be attempted in 5 seconds', e.reason);
-                setTimeout(function() {
-                    connect();
-                }, 5000);
+        socket.onclose = function(e) {
+            console.log('Socket is closed. Reconnect will be attempted in 5 seconds', e.reason);
+            setTimeout(function() {
+                connect();
+            }, 5000);
+        };
+
+        socket.onmessage = function(e) {
+            // console.log(e.data);
+            var data = JSON.parse(e.data);
+            if ('base_dir' in data) {
+                $('#filemanager-content').html(data.base_dir);
             };
-
-
-            socket.onmessage = function (e) {
-                console.log(e.data);
-                var data = JSON.parse(e.data);
-                if ( 'base_dir' in data ) {
-                    $('#filemanager-content').html(data.base_dir);
-                };
-                if ( 'filename' in data ) {
-                    const link    = document.createElement('a');
-                    link.download = data.filename;
-                    link.href     = window.location.origin + "/" + data.path + "/" + data.filename;
-                    console.log(link.href);
-                    link.click();
-                };
+            if ('filename' in data) {
+                const link = document.createElement('a');
+                link.download = data.filename;
+                link.href = window.location.origin + "/" + data.path + "/" + data.filename;
+                console.log(link.href);
+                link.click();
             };
         };
-     } );
+    };
+});
 
-    function browser_path (msg) {
-        socket.send(JSON.stringify({base_dir: msg}));
-    };
-    function get_file (msg) {
-        console.log(msg);
-        socket.send(JSON.stringify({get_file: msg}));
-        // alert("preparing to fetch...\n" + decodeURIComponent(msg));
-    };
-    function delete_file (msg) {
-        console.log(msg);
-        let text="delete\n" + decodeURIComponent(msg);
-        if (confirm(text) == true) {
-            socket.send(JSON.stringify({delete_file: msg}));
-        }
-    };
-    function upload_file (msg) {
-        var encoded = encodeURIComponent(msg);
-        console.log(encoded);
-        socket.send(JSON.stringify({upload_file: msg}));
-    };
+function browser_path(msg) {
+    socket.send(JSON.stringify({
+        base_dir: msg
+    }));
+};
+
+function get_file(msg) {
+    console.log(msg);
+    socket.send(JSON.stringify({
+        get_file: msg
+    }));
+    // alert("preparing to fetch...\n" + decodeURIComponent(msg));
+};
+
+function delete_file(msg) {
+    console.log(msg);
+    let text = "delete\n" + decodeURIComponent(msg);
+    if (confirm(text) == true) {
+        socket.send(JSON.stringify({
+            delete_file: msg
+        }));
+    }
+};
+
+function upload_file(msg) {
+    var encoded = encodeURIComponent(msg);
+    console.log(encoded);
+    socket.send(JSON.stringify({
+        upload_file: msg
+    }));
+};
 
 
 function _(el) {
-  return document.getElementById(el);
+    return document.getElementById(el);
 }
+
 
 function uploadFile(folder) {
-  var file = _("file").files[0];
-  // alert(file.name+" | "+file.size+" | "+file.type+" | "+folder);
-  var formdata = new FormData();
-  formdata.append("file", file);
-  formdata.append("folder", folder);
-  var ajax = new XMLHttpRequest();
-  ajax.upload.addEventListener("progress", progressHandler, false);
-  ajax.addEventListener("load", completeHandler, false);
-  ajax.addEventListener("error", errorHandler, false);
-  ajax.addEventListener("abort", abortHandler, false);
-  ajax.open("POST", "/upload");
-  ajax.send(formdata);
+    console.log(folder);
+    var arrayLength = _("filelist").files.length;
+
+    for (var i = 0; i < arrayLength; i++) {
+        var thisfile = _("filelist").files[i];
+        var formdata = new FormData();
+        formdata.append("file", thisfile);
+        formdata.append("folder", folder);
+
+        var ajax = new XMLHttpRequest();
+
+        ajax.upload.addEventListener("loadstart", function(e) {
+            var uniqID = Math.floor((Math.random() * 100000));
+            this.progressID = "progress_" + uniqID;
+            this.filesizeID = "filesize_" + uniqID;
+            this.filename = thisfile.name;
+            console.log("inserting progress html for " + this.filename + ": " + this.progressID + " " + this.filesizeID);
+            $("#dynamic_progress").prepend('<div><progress id="' + this.progressID + '" value="0" max="100" style="width:50%;"></progress></div>');
+            $("#dynamic_progress").prepend('<div><b>' + this.filename + '</b></div><div id="' + this.filesizeID + '"><br></div>');
+        }, false);
+
+        ajax.upload.addEventListener("progress", function(e) {
+            var percent = (e.loaded / e.total) * 100;
+            _(this.progressID).value = Math.round(percent);
+            _(this.filesizeID).innerHTML = (formatBytes(e.loaded) + " of " + formatBytes(e.total) + " uploaded");
+            if (percent == 100) {
+                _(this.filesizeID).innerHTML = formatBytes(e.total) + " recieved...moving to staging area";
+            }
+        }, false);
+
+        ajax.upload.addEventListener("load", function(e) {
+            console.log("server response: " + e.target.responseText);
+            _(this.filesizeID).innerHTML = "finished";
+        }, false);
+
+        ajax.upload.addEventListener("error", function(e) {
+            console.log(this.filename + " upload failed");
+            _(this.filesizeID).innerHTML = "upload failed";
+        }, false);
+
+        ajax.upload.addEventListener("abort", function(e) {
+            console.log(this.filename + " upload aborted");
+            _(this.filesizeID).innerHTML = "upload aborted";
+        }, false);
+
+        ajax.open("POST", "/upload");
+        ajax.send(formdata);
+    }
 }
 
-function progressHandler(event) {
-  _("loaded_n_total").innerHTML = "Uploaded " + event.loaded + " bytes of " + event.total;
-  var percent = (event.loaded / event.total) * 100;
-  _("progressBar").value = Math.round(percent);
-  _("status").innerHTML = Math.round(percent) + "% uploaded... please wait";
-  if ( percent == 100 ) {
-    _("status").innerHTML = "finished...moving to staging area";
-  }
-}
+function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
 
-function completeHandler(event) {
-  _("status").innerHTML = event.target.responseText;
-  _("progressBar").value = 0; //wil clear progress bar after successful upload
-  var decoded_folder = decodeURIComponent(folder);
-  // browser_path(decoded_folder);
-}
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
 
-function errorHandler(event) {
-  _("status").innerHTML = "Upload Failed";
-}
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-function abortHandler(event) {
-  _("status").innerHTML = "Upload Aborted";
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 </script>
-
-
 </body>
 </html>
 
