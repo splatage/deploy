@@ -3548,11 +3548,9 @@ function upload_file(msg) {
     }));
 };
 
-
 function _(el) {
     return document.getElementById(el);
 }
-
 
 function uploadFile(folder) {
     console.log(folder);
