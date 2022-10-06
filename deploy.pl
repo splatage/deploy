@@ -3581,7 +3581,7 @@ function uploadFile(folder) {
             _(this.progressID).value = Math.round(percent);
             _(this.filesizeID).innerHTML = (formatBytes(e.loaded) + " of " + formatBytes(e.total) + " uploaded");
             if (percent == 100) {
-                _(this.filesizeID).innerHTML = formatBytes(e.total) + " recieved...moving to staging area";
+                _(this.filesizeID).innerHTML = "moving to staging area...";
             }
         }, false);
 
