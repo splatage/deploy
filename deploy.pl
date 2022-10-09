@@ -689,6 +689,7 @@ get '/' => sub {
     $c->render( template => 'index' );
 };
 
+
 get '/pool' => sub {
     my $c  = shift;
     my $username    = $c->yancy->auth->current_user->{'username'};
@@ -946,7 +947,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
             app->log->trace("id: $elements[-1] -> $id");
 
-            my $preview = 'file binary or preview unavailable';
+            my $preview = 'binary file or preview unavailable';
             if ( defined $file_content{$filename} ) {
                 $preview = qq(
                     <h6>preview:</h6>
@@ -970,6 +971,8 @@ websocket '/filemanager/<game>-ws' => sub {
                );
             }
             else {
+            my $modal = 'editor_m';
+            my $label = 'editor_label';
             $content .= qq(
                 <span class="col-md-4">
                     <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
@@ -987,10 +990,23 @@ websocket '/filemanager/<game>-ws' => sub {
                                 style="width: 100px !important;" onclick="delete_file('$encoded_file_link')">
                             delete
                         </button>
+                        );
 
+                         if ( defined $file_content{$filename} ) {
+                        $content .= qq(
+                        <!-- Button trigger modal -->
+                        <button class="btn btn-sm btn-outline-secondary m-1" data-bs-toggle="modal"
+                                data-bs-dismiss="offcanvas" data-bs-target="#editor_m" style="width: 100px !important;"
+                                onclick="edit_file('$encoded_file_link')" >
+                          edit
+                        </button>
+                        );
+                        }
+
+                        $content .= qq(
                         <button class="btn btn-sm btn-outline-primary m-1" type="button" data-bs-dismiss="offcanvas"
                                 style="width: 100px !important;" onclick="get_file('$encoded_file_link')">
-                            download
+                          download
                         </button>
 
                         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
@@ -1071,7 +1087,7 @@ websocket '/filemanager/<game>-ws' => sub {
         # $Net::OpenSSH::debug = ~0;
         my $path = path("tmp/$id")->make_path;
 
-        my $cmd = qq(cd "$home_dir$filepath"; tar czf - "$filename");
+        my $cmd = qq(cd '$home_dir$filepath'; tar czf - '$filename');
         my $remote = $ssh->{'link'}->make_remote_command($cmd);
         system "$remote | tar xvzf - -C tmp/$id  ";
 
@@ -1105,15 +1121,95 @@ websocket '/filemanager/<game>-ws' => sub {
             $browser->();
     };
 
+    my $load_editor_content = sub {
+        my ($c, $hash) = @_;
+
+        app->log->info("file edit requested");
+
+        my $file = $hash->{file_path} if ( $hash->{file_path} );
+           $file = url_unescape $file;
+
+        app->log->debug("file: $home_dir + $file");
+
+        my $filename = ( split '/', $file )[-1];
+        my $filepath = $file =~ s/[^\/]+$//r;
+
+        app->log->debug("$filepath: $filename");
+
+        # $Net::OpenSSH::debug = ~0;
+        my $id = '';
+        for my $i (0..10) {
+            $id .= chr(rand(25) + 97);
+        }
+
+        my $path    = path("tmp/$id")->make_path;
+        my $cmd     = qq(cd '$home_dir$filepath'; tar --no-wildcards -czf - '$filename');
+        my $remote  = $ssh->{'link'}->make_remote_command($cmd);
+        system "$remote | tar xvzf - -C tmp/$id  ";
+
+        open my $fh, '<', "tmp/$id/$filename";
+             my $content = do { local $/; <$fh> };
+        close $fh;
+            app->log->trace("file: $content");
+
+        $self->send( encode_json{ editor_content => $content } ) if $content;
+
+        $path->remove_tree({keep_root => 1}, "tmp/$id");
+    };
+
+    my $save_editor_content = sub {
+        my ($c, $hash) = @_;
+
+        app->log->info("file save requested");
+
+        my $file    = $hash->{file_path} if ( $hash->{file_path} );
+           $file    = url_unescape $file;
+        my $content = $hash->{save_editor_content};
+
+        app->log->info("file: $home_dir + $file");
+        app->log->info($content);
+
+        my $filename    = ( split '/', $file )[-1];
+        my $filepath    = $file =~ s/[^\/]+$//r;
+        my $store_path  = $home_dir . $filepath;
+
+        app->log->info("$store_path/$filename");
+
+        my $id = '';
+        for my $i (0..10) {
+            $id .= chr(rand(25) + 97);
+        }
+
+        my $path = path("tmp/$id")->make_path;
+            open my $fh, '>', $path . "/" . $filename;
+            print {$fh} $content;
+            close $fh;
+
+        #system "echo $content | base64 - -d > $path/$filename";
+
+        my $cmd = qq( tar xvzf - -C '$store_path' );
+        my $remote_cmd   = $ssh->{'link'}->make_remote_command($cmd);
+        my $combined_cmd = qq(cd '$path'; tar czf - '$filename' | $remote_cmd );
+
+        system "$combined_cmd";
+
+        app->log->info("cd $path; tar czf - $filename | $remote_cmd");
+
+        $path->remove_tree({keep_root => 1}, "tmp/$id");
+
+    };
+
     $self->on(json => sub {
         my ($c, $hash) = @_;
         app->log->debug("incoming websocket request");
         my $bugs = Dumper($hash);
-        app->log->debug("$bugs");
+        app->log->trace("$bugs");
 
          $browser->($c, $hash) if $hash->{base_dir};
          $get_file->($c, $hash) if $hash->{get_file};
          $delete_file->($c, $hash) if $hash->{delete_file};
+         $load_editor_content->($c, $hash) if $hash->{load_editor_content};
+         $save_editor_content->($c, $hash) if $hash->{save_editor_content};
     });
 
     $self->on(finish => sub ($ws, $code, $reason) {
@@ -2793,11 +2889,12 @@ __DATA__
 
 
 <style>
-body  {
-    background-image: url("/images/background.jpg");
-    background-size: cover;
-    background-repeat: repeat-x;
-    background-attachment: fixed;
+
+body {
+  background-image: url("/images/background.jpg");
+  background-size: cover;
+  background-repeat: repeat-x;
+  background-attachment: fixed;
 }
 
 .custom {
@@ -3461,6 +3558,21 @@ $(document).ready(function() {
 
 @@ filemanager.html.ep
 % layout 'template';
+
+<head>
+<style type="text/css" media="screen">
+    #editor {
+        position: relative;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 65vh;
+</style>
+
+</head>
+<body>
 <div class="container-fluid text-left">
   <div class="alert alert-success alert-dismissible show" role="alert">
     <h4 class="alert-heading">
@@ -3476,6 +3588,32 @@ $(document).ready(function() {
 <div id='filemanager-editor' class="text-break container-sm text-break"></div>
 <!-- filemanager content -->
 <div id='filemanager-content' class="text-break container-sm text-break"></div>
+                 <!-- Modal -->
+                <div class="modal fade" id="editor_m" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1"
+                     aria-labelledby="editor_label" aria-hidden="true" >
+                 <div class="modal-dialog modal-xl">
+                    <div class="modal-content">
+                      <div class="modal-header">
+                        <h1 class="modal-title fs-5" id="editor_label">file editor</h1>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                      </div>
+                      <div class="modal-body">
+                        <!-- editor embedded here -->
+                        <div id="editor"></div>
+                        <!-- -->
+                      </div>
+                  <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">close</button>
+            <button type="button" class="btn btn-primary" onclick="edit_file('save')">save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+</body>
+
+
+<script src="/ace-builds-master/src-min-noconflict/ace.js"></script>
+
 
 <script>
 var socket;
@@ -3510,6 +3648,10 @@ $(document).ready(function() {
                 link.href = window.location.origin + "/" + data.path + "/" + data.filename;
                 console.log(link.href);
                 link.click();
+            };
+            if ( 'editor_content' in data ) {
+                console.log(data.editor_content);
+                editor.session.setValue(data.editor_content);
             };
         };
     };
@@ -3547,6 +3689,36 @@ function upload_file(msg) {
     }));
 };
 
+var editor;
+var current_file;
+function edit_file(msg) {
+    if ( msg == 'save' ) {
+        var content = editor.getValue();
+            alert("file saved\n" + current_file);
+
+        socket.send(JSON.stringify({
+            save_editor_content: content,
+            file_path: current_file
+        }));
+    } else {
+        current_file = msg;
+        editor = ace.edit("editor");
+        editor.setTheme("/ace-builds-master/css/theme/monokai");
+        editor.session.setMode("/ace-builds-master/src-min-noconflict/mode/ymal");
+        editor.session.setTabSize(4);
+        editor.session.setUseSoftTabs(true);
+        editor.setShowPrintMargin(false);
+        document.getElementById('editor').style.fontSize='1em';
+        _('editor_label').innerHTML = "file editor: " + decodeURIComponent(msg);
+
+        socket.send(JSON.stringify({
+            load_editor_content: true,
+            file_path: msg
+        }));
+    }
+};
+
+
 function _(el) {
     return document.getElementById(el);
 }
@@ -3569,8 +3741,9 @@ function uploadFile(folder) {
             this.filesizeID = "filesize_" + uniqID;
             this.filename = thisfile.name;
             console.log("inserting progress html for " + this.filename + ": " + this.progressID + " " + this.filesizeID);
-            $("#dynamic_progress").prepend('<div><progress id="' + this.progressID + '" value="0" max="100" style="width:50%;"></progress></div>');
-            $("#dynamic_progress").prepend('<div><b>' + this.filename + '</b></div><div id="' + this.filesizeID + '"><br></div>');
+            $("#dynamic_progress").prepend('<div><progress id="' + this.progressID + '" value="0" max="100" style="width: 50%;"></progress></div>');
+       //     $("#dynamic_progress").prepend('<div><b>' + this.filename + '</b></div><div id="' + this.filesizeID + '"><br></div>');
+            $("#dynamic_progress").prepend('<b>' + this.filename + '</b></div><div id="' + this.filesizeID + '"><br></div>');
         }, false);
 
         ajax.upload.addEventListener("progress", function(e) {
