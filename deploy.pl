@@ -867,7 +867,7 @@ websocket '/filemanager/<game>-ws' => sub {
         app->log->debug("$game path: $path");
 
         my $ls_cmd      = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' && );
-           $ls_cmd     .=  q(stat * .* --format '%F,%n,%Y,%s,%w,%y' | sort -k1 -k2 -k3);
+           $ls_cmd     .=  q(stat * .* --format '%F,%n,%Y,%s,%W' | sort -k1 -k2 -k3);
 
         my $files       = $ssh->{'link'}->capture("$ls_cmd") ; #if $hash->{path};
 
@@ -912,10 +912,13 @@ websocket '/filemanager/<game>-ws' => sub {
         $content .= q(<div class="container"><div class="row">);
 
         foreach my $line ( split '\n',  $files ) {
-            my $color = 'light';
-            my $icon = q(bi-question-square);
-            my ($type, $filename, $epoc, $size, $created, $modified) = split( ',', $line );
-            $size = format_bytes $size ;
+            my $color   = 'light';
+            my $icon    = q(bi-question-square);
+            my ($type, $filename, $modified, $size, $created) = split( ',', $line );
+                $size   = format_bytes $size ;
+                $modified = strftime('%Y-%m-%d %H:%M:%S', gmtime($modified));
+                $created  = strftime('%Y-%m-%d %H:%M:%S', gmtime($created));
+
 
             my $encoded_file_link = $path . '/' . $filename;
                $encoded_file_link = url_escape $encoded_file_link;
@@ -1018,7 +1021,7 @@ websocket '/filemanager/<game>-ws' => sub {
                         <div>
                            <h6>folder: $path</h6>
                            <h6>size: $size</h6>
-                           <h6>created: $created</h6>
+                           <h6>created:  $created</h6>
                            <h6>modified: $modified</h6>
                            <hr>
                             $preview
