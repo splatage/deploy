@@ -857,7 +857,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
     my $browser = sub {
         my ($c, $hash) = @_;
-        my $content;
+        my $content = '';
         my %file_content;
 
         # Strip out any double dots
@@ -866,7 +866,9 @@ websocket '/filemanager/<game>-ws' => sub {
         my $encoded_path = url_escape $path;
         app->log->debug("$game path: $path");
 
-        my $ls_cmd      = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' && ls -lhQa --group-directories-first);
+        my $ls_cmd      = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' && );
+           $ls_cmd     .=  q(stat * .* --format '%F,%n,%Y,%s,%w,%y' | sort -k1 -k2 -k3);
+
         my $files       = $ssh->{'link'}->capture("$ls_cmd") ; #if $hash->{path};
 
         my $file_cmd    = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' );
@@ -912,24 +914,25 @@ websocket '/filemanager/<game>-ws' => sub {
         foreach my $line ( split '\n',  $files ) {
             my $color = 'light';
             my $icon = q(bi-question-square);
-            my @elements = quotewords( '\s+', 0, $line );
-            my $filename = $elements[-1];
-            my $encoded_file_link = $path . '/' . $elements[-1];
+            my ($type, $filename, $epoc, $size, $created, $modified) = split( ',', $line );
+            $size = format_bytes $size ;
+
+            my $encoded_file_link = $path . '/' . $filename;
                $encoded_file_link = url_escape $encoded_file_link;
 
-            if ( $line =~ m/[0-9]+[MKG]$/ ) { next }
-            if ( $line =~ m/\."$/ ) { next }
-            if ( $line =~ m/txt"$/ )  { $icon = q(bi-filetype-txt);   }
-            if ( $line =~ m/jar"$/ )  { $icon = q(bi-filetype-java);  }
-            if ( $line =~ m/json"$/ ) { $icon = q(bi-filetype-json);  }
-            if ( $line =~ m/yml"$/ )  { $icon = q(bi-filetype-yml); $color = 'green'   }
-            if ( $line =~ m/txt"$/ )  { $icon = q(bi-filetype-txt);   }
-            if ( $line =~ m/sh"$/ )   { $icon = q(bi-filetype-sh);    }
-            if ( $line =~ m/log[.0-9]*"$/ )  { $icon = q(bi-journal-bookmark);   }
-            if ( $line =~ m/sql"$/ )  { $icon = q(bi-filetype-sql);   }
-            if ( $line =~ m/png"$/ )  { $icon = q(bi-filetype-png);   }
-            if ( $line =~ m/rc"$/ )   { $icon = q(bi-gear);           }
-            if ( $line =~ m/gz"$/ )  { $icon = q(bi-file-earmark-zip);   }
+            if ( $filename =~ m/[0-9]+[MKG]$/ ) { next }
+            if ( $filename =~ m/\.+$/ ) { next }
+            if ( $filename =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $filename =~ m/jar$/ )  { $icon = q(bi-filetype-java);  }
+            if ( $filename =~ m/json$/ ) { $icon = q(bi-filetype-json);  }
+            if ( $filename =~ m/yml$/ )  { $icon = q(bi-filetype-yml); $color = 'green'   }
+            if ( $filename =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
+            if ( $filename =~ m/sh$/ )   { $icon = q(bi-filetype-sh);    }
+            if ( $filename =~ m/log[.0-9]*$/ )  { $icon = q(bi-journal-bookmark);   }
+            if ( $filename =~ m/sql$/ )  { $icon = q(bi-filetype-sql);   }
+            if ( $filename =~ m/png$/ )  { $icon = q(bi-filetype-png);   }
+            if ( $filename =~ m/rc$/ )   { $icon = q(bi-gear);           }
+            if ( $filename =~ m/gz$/ )  { $icon = q(bi-file-earmark-zip);   }
 
             if ( $line =~ m/json"$/ && $file_content{$filename} ne '' ) {
              $file_content{$filename} =~ s/":"/" => "/g;
@@ -945,7 +948,7 @@ websocket '/filemanager/<game>-ws' => sub {
                 $id .= chr(rand(25) + 97);
             }
 
-            app->log->trace("id: $elements[-1] -> $id");
+            app->log->trace("id: $filename -> $id");
 
             my $preview = 'binary file or preview unavailable';
             if ( defined $file_content{$filename} ) {
@@ -958,14 +961,14 @@ websocket '/filemanager/<game>-ws' => sub {
                 );
             }
 
-            if ( $line =~ m/^d/ ) {
+            if ( $type =~ m/^directory/ ) {
                 $icon = q(bi-folder-fill); $color = 'green';
                 $content .= qq(
                 <span class="col-md-4">
                     <button class="btn" data-bs-target="#$id style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;"
-                     type="submit" id="$id" value="$path/$elements[-1]" onclick="browser_path('$path/$elements[-1]')">
+                     type="submit" id="$id" value="$path/$filename" onclick="browser_path('$path/$filename')">
                     <i class="bi $icon" style="font-size: 1.75rem; color: $color;"></i>
-                    $elements[-1]
+                    $filename
                     </button>
                 </span>
                );
@@ -978,13 +981,13 @@ websocket '/filemanager/<game>-ws' => sub {
                     <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
                         aria-controls="$id" style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;">
                     <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;"></i>
-                    $elements[-1]
+                    $filename
                     </button>
                   <div class="offcanvas offcanvas-start" style="width: 750px;" tabindex="-1" id="$id"
                         aria-labelledby="$id">
                     <div class="offcanvas-header d-flex justify-content-between">
                         <h5 class="offcanvas-title align-bottom flex-grow-1" id="$id">
-                        <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $elements[-1] </h5>
+                        <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $filename </h5>
 
                         <button class="btn btn-sm btn-outline-danger m-1" type="button" data-bs-dismiss="offcanvas"
                                 style="width: 100px !important;" onclick="delete_file('$encoded_file_link')">
@@ -1014,8 +1017,9 @@ websocket '/filemanager/<game>-ws' => sub {
                     <div class="offcanvas-body">
                         <div>
                            <h6>folder: $path</h6>
-                           <h6>size: $elements[4]</h6>
-                           <h6>modified: $elements[5] $elements[6] $elements[7]</h6>
+                           <h6>size: $size</h6>
+                           <h6>created: $created</h6>
+                           <h6>modified: $modified</h6>
                            <hr>
                             $preview
                         </div>
@@ -1087,9 +1091,9 @@ websocket '/filemanager/<game>-ws' => sub {
         # $Net::OpenSSH::debug = ~0;
         my $path = path("tmp/$id")->make_path;
 
-        my $cmd = qq(cd '$home_dir$filepath'; tar czf - '$filename');
+        my $cmd = qq(cd '$home_dir$filepath'; tar cf - '$filename');
         my $remote = $ssh->{'link'}->make_remote_command($cmd);
-        system "$remote | tar xvzf - -C tmp/$id  ";
+        system "$remote | tar xvf - -C tmp/$id  ";
 
         my $encoded = $id . '/' . $filename;
            $encoded = b64_encode $encoded;
@@ -1143,9 +1147,9 @@ websocket '/filemanager/<game>-ws' => sub {
         }
 
         my $path    = path("tmp/$id")->make_path;
-        my $cmd     = qq(cd '$home_dir$filepath'; tar --no-wildcards -czf - '$filename');
+        my $cmd     = qq(cd '$home_dir$filepath'; tar --no-wildcards -cf - '$filename');
         my $remote  = $ssh->{'link'}->make_remote_command($cmd);
-        system "$remote | tar xvzf - -C tmp/$id  ";
+        system "$remote | tar xvf - -C tmp/$id  ";
 
         open my $fh, '<', "tmp/$id/$filename";
              my $content = do { local $/; <$fh> };
@@ -1166,8 +1170,8 @@ websocket '/filemanager/<game>-ws' => sub {
            $file    = url_unescape $file;
         my $content = $hash->{save_editor_content};
 
-        app->log->info("file: $home_dir + $file");
-        app->log->info($content);
+        app->log->debug("file: $home_dir + $file");
+        app->log->debug($content);
 
         my $filename    = ( split '/', $file )[-1];
         my $filepath    = $file =~ s/[^\/]+$//r;
@@ -1187,13 +1191,13 @@ websocket '/filemanager/<game>-ws' => sub {
 
         #system "echo $content | base64 - -d > $path/$filename";
 
-        my $cmd = qq( tar xvzf - -C '$store_path' );
+        my $cmd = qq( tar xvf - -C '$store_path' );
         my $remote_cmd   = $ssh->{'link'}->make_remote_command($cmd);
-        my $combined_cmd = qq(cd '$path'; tar czf - '$filename' | $remote_cmd );
+        my $combined_cmd = qq(cd '$path'; tar cf - '$filename' | $remote_cmd );
 
         system "$combined_cmd";
 
-        app->log->info("cd $path; tar czf - $filename | $remote_cmd");
+        app->log->trace("cd $path; tar cf - $filename | $remote_cmd");
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
 
@@ -1588,12 +1592,12 @@ post '/upload' => sub {
     my $path = path("tmp/$id")->make_path;
        $file->move_to( $path . '/' . $name );
 
-    my $cmd = qq( tar xvzf - -C "$store_path/$target_path" );
+    my $cmd = qq( tar xvf - -C "$store_path/$target_path" );
         my $remote_cmd   = $ssh->{'link'}->make_remote_command($cmd);
-        my $combined_cmd = qq(cd "$path"; tar czf - "$name" | $remote_cmd );
+        my $combined_cmd = qq(cd "$path"; tar cf - "$name" | $remote_cmd );
         system "$combined_cmd";
 
-        app->log->trace("cd $path; cd $path; tar czf - $name | ssh $cmd");
+        app->log->trace("cd $path; cd $path; tar cf - $name | ssh $cmd");
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
 
