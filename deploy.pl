@@ -3576,6 +3576,8 @@ $(document).ready(function() {
         left: 0;
         width: 100%;
         height: 65vh;
+        background: #e9ecef;
+
 </style>
 
 </head>
@@ -3604,11 +3606,14 @@ $(document).ready(function() {
                         <h1 class="modal-title fs-5" id="editor_label">file editor</h1>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                       </div>
-                      <div class="modal-body">
+ 
+                      <div class="modal-bodybg-success p-1 text-dark bg-opacity-10 rounded border border-success shadow m-3"
+                        style="--bs-border-opacity: .5;">
                         <!-- editor embedded here -->
                         <div id="editor"></div>
                         <!-- -->
                       </div>
+
                   <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">close</button>
             <button type="button" class="btn btn-primary" onclick="edit_file('save')">save</button>
