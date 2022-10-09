@@ -2769,8 +2769,8 @@ sub deployGame {
 
     $cp_from = $settings->{$game}{'store_path'} . "/" . $game;
 
-    my $rsync_cmd  = "rsync -auv --delete -e 'ssh -o StrictHostKeyChecking=no --exclude='log/*";
-       $rsync_cmd .= "-o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to";
+    my $rsync_cmd  = qq(rsync -auv --delete --exclude="game_files/log/*" -e 'ssh -o StrictHostKeyChecking=no );
+       $rsync_cmd .= qq(-o PasswordAuthentication=no -o BatchMode=yes' $cp_from $cp_to);
     app->log->debug(" $rsync_cmd ");
 
     my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => $args{'ssh_master'} );
@@ -3694,7 +3694,7 @@ var current_file;
 function edit_file(msg) {
     if ( msg == 'save' ) {
         var content = editor.getValue();
-            alert("file saved\n" + current_file);
+            alert( "saved: " + decodeURIComponent(current_file) );
 
         socket.send(JSON.stringify({
             save_editor_content: content,
