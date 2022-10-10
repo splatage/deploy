@@ -897,7 +897,7 @@ websocket '/filemanager/<game>-ws' => sub {
         my $combined_crumbs;
 
         foreach ( @breadcrumbs ) {
-            next if ( $_ =~ m/^$/ );
+            next if ( $_ =~ m/^\.*$/ );
 
             $combined_crumbs .= '/' . $_;
             $content .= qq(
@@ -924,7 +924,7 @@ websocket '/filemanager/<game>-ws' => sub {
                $encoded_file_link = url_escape $encoded_file_link;
 
             if ( $filename =~ m/[0-9]+[MKG]$/ ) { next }
-            if ( $filename =~ m/\.+$/ ) { next }
+            if ( $filename =~ m/\.+$/ )  { next }
             if ( $filename =~ m/txt$/ )  { $icon = q(bi-filetype-txt);   }
             if ( $filename =~ m/jar$/ )  { $icon = q(bi-filetype-java);  }
             if ( $filename =~ m/json$/ ) { $icon = q(bi-filetype-json);  }
@@ -1454,7 +1454,7 @@ websocket '/log/:node/<game>-ws' => sub {
             ssh_master  => $config->{'ssh_master'}
         );
 
-        my $content;
+        my $content = '';
 
         foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
             ++$logdata->{'line_index'};                                 # Index hardcopy.
@@ -1465,7 +1465,7 @@ websocket '/log/:node/<game>-ws' => sub {
         $logdata->{'content'} =~ s/([^\n]{60})(\[[0-9:]{8})/$1\n$2/g;   # Newline for log timestamps
 
         foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
-            $content = "<div>" . $_ . "</div>\n" . $content if $_;
+            $content = "<div>" . $_ . "</div>\n" . $content unless ( $_ eq '' );
         };
         $logdata->{'content'} = '';
         $screenlog = $logdata->{'screenlog'};
@@ -3599,7 +3599,7 @@ $(document).ready(function() {
                  <!-- Modal -->
                 <div class="modal fade" id="editor_m" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1"
                      aria-labelledby="editor_label" aria-hidden="true" >
-                 <div class="modal-dialog modal-xl">
+                 <div class="modal-dialog modal-xl" style="min-width: 80%;">
                     <div class="modal-content">
                       <div class="modal-header">
                         <h1 class="modal-title fs-5" id="editor_label">file editor</h1>
@@ -3622,8 +3622,8 @@ $(document).ready(function() {
 </body>
 
 
-<script src="/ace-builds-master/src-min-noconflict/ace.js"></script>
-
+<script src="/ace-builds-master/src-min-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
+<script src="/ace-builds-master/src-min-noconflict/ext-modelist.js" type="text/javascript" charset="utf-8"></script>
 
 <script>
 var socket;
@@ -3668,8 +3668,12 @@ $(document).ready(function() {
 });
 
 function browser_path(msg) {
+    //var path = require('path');
+    var safe_input = msg.normalize('NFC').replace(/\/*(\.+(\/|\\|$))+/, '');
+    // safe_input = safe_input.replace(/(\.+(\/|\\|$))+/, '');
+    // alert(msg + " " + safe_input);
     socket.send(JSON.stringify({
-        base_dir: msg
+        base_dir: safe_input
     }));
 };
 
@@ -3712,9 +3716,16 @@ function edit_file(msg) {
         }));
     } else {
         current_file = msg;
+        var decode_path = decodeURIComponent(msg);
         editor = ace.edit("editor");
-        editor.setTheme("/ace-builds-master/css/theme/monokai");
-        editor.session.setMode("/ace-builds-master/src-min-noconflict/mode/ymal");
+
+        var modelist = ace.require("ace/ext/modelist");
+        var mode = modelist.getModeForPath(decode_path).mode;
+
+        console.log("setting syntax mode: " + mode);
+        editor.session.setMode(mode);
+
+        editor.setTheme("ace/theme/dawn");
         editor.session.setTabSize(4);
         editor.session.setUseSoftTabs(true);
         editor.setShowPrintMargin(false);
