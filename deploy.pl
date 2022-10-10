@@ -8,7 +8,7 @@ use DBD::mysql;
 use DBI;
 use Mojolicious::Plugin::Authentication;
 use Mojo::UserAgent;
-use Mojo::JSON qw(decode_json encode_json);
+use Mojo::JSON qw(decode_json encode_json to_json from_json);
 use Mojo::File  qw(path );
 use Mojo::Util qw(b64_encode b64_decode url_escape url_unescape);
 use Digest::Bcrypt;
@@ -20,6 +20,7 @@ use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
 use Text::ParseWords;
+use utf8;
 
 use strict;
 use warnings;
@@ -958,7 +959,7 @@ websocket '/filemanager/<game>-ws' => sub {
                 $preview = qq(
                     <h6>preview:</h6>
                     <div class="bg-success p-1 text-dark bg-opacity-10 rounded border border-success shadow"
-                        style="--bs-border-opacity: .5;">
+                        style="--bs-border-opacity: .10;">
                         <pre>$file_content{$filename}</pre>
                     </div>
                 );
@@ -1065,8 +1066,8 @@ websocket '/filemanager/<game>-ws' => sub {
             <script> var here='$combined_crumbs'; <script>
         );
 
-        $content = encode_json{ base_dir => $content };
-        $self->send("$content");
+        #$content = to_json{ base_dir => $content };
+        $self->send( to_json{ base_dir => $content } );
     };
 
 
@@ -1102,7 +1103,7 @@ websocket '/filemanager/<game>-ws' => sub {
            $encoded = b64_encode $encoded;
 
         app->log->info("$encoded");
-        $self->send( encode_json{ path => "download", filename => $encoded } ) ;
+        $self->send( to_json{ path => "download", filename => $encoded } ) ;
        # $self->send( $content ) if $content;
     };
 
@@ -1154,12 +1155,21 @@ websocket '/filemanager/<game>-ws' => sub {
         my $remote  = $ssh->{'link'}->make_remote_command($cmd);
         system "$remote | tar xvf - -C tmp/$id  ";
 
-        open my $fh, '<', "tmp/$id/$filename";
-             my $content = do { local $/; <$fh> };
-        close $fh;
-            app->log->trace("file: $content");
+my $content;
+#        open my $fh, '<:encoding(utf8)', "tmp/$id/$filename";
+#        # binmode($fh, ":utf8");
+#        my $content = do { local $/; <$fh> };
+#        close $fh;
 
-        $self->send( encode_json{ editor_content => $content } ) if $content;
+if (open FILE, '<:encoding(utf8)', "tmp/$id/$filename") {
+  while(<FILE>) {
+    $content .= $_;
+  }
+  close FILE;
+}
+            app->log->info("file: $content");
+
+        $self->send( to_json{ editor_content => $content } ) if $content;
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
     };
@@ -1188,7 +1198,8 @@ websocket '/filemanager/<game>-ws' => sub {
         }
 
         my $path = path("tmp/$id")->make_path;
-            open my $fh, '>', $path . "/" . $filename;
+            open my $fh, '>:utf8', $path . "/" . $filename;
+            # binmode($fh, ":utf8");
             print {$fh} $content;
             close $fh;
 
@@ -1364,10 +1375,10 @@ websocket '/logfile-ws' => sub {
                  );
 
         if ( $results->{'new_content'} ) {
-            my $content;
+            my $content = '';
             foreach ( split( /\n/, ( $results->{'new_content'} ) ) ) {
                 ++$line_index;
-                $content = '<div>' . $_ . "</div>\n" . $content;
+                $content = '<div>' . $_ . "</div>\n" . $content unless ( $_ eq '' );
             }
             $self->send( $content );
         }
@@ -1675,7 +1686,7 @@ sub updatePage_game {
 
 sub updatePage {
     my %args = (
-       line_index   => '',
+       line_index   => 0 ,
        iteration    => '',
        ip           => '',
        user         => '',
@@ -3077,7 +3088,7 @@ html {
     crossorigin="anonymous"></script>
 
 
-<script type="text/javascript">
+<script type="text/javascript" charset="utf-8">
 $(document).ready(function() {
     $('.spinner-hide').hide();
     window.setTimeout(function() {
@@ -3462,7 +3473,7 @@ window.addEventListener("beforeunload", function(e) {
   <a class="btn btn-outline-success" href="/serverlog/trace" role="button">trace</a>
 </div>
 
-<script type="text/javascript">
+<script type="text/javascript" charset="utf-8">
 var socket;
 var ws_host;
 
@@ -3565,7 +3576,7 @@ $(document).ready(function() {
   <input type="text" autocomplete="off" class="form-control" id="cmd" placeholder="console" aria-label="Sizing example input" aria-describedby="inputGroup-sizing-sm">
 </div>
 
-<script type="text/javascript">
+<script type="text/javascript" charset="utf-8">
 var socket;
 var ws_host;
 
@@ -3708,6 +3719,7 @@ $(document).ready(function() {
             if ( 'editor_content' in data ) {
                 console.log(data.editor_content);
                 editor.session.setValue(data.editor_content);
+                // alert(data.editor_content);
             };
         };
     };
@@ -3754,7 +3766,7 @@ var current_file;
 function edit_file(msg) {
     if ( msg == 'save' ) {
         var content = editor.getValue();
-            alert( "saved: " + decodeURIComponent(current_file) );
+            alert( "saved: " + decodeURIComponent(current_file) +"\n" + content );
 
         socket.send(JSON.stringify({
             save_editor_content: content,
