@@ -3575,9 +3575,8 @@ $(document).ready(function() {
         bottom: 0;
         left: 0;
         width: 100%;
-        height: 65vh;
-        background: #e9ecef;
-
+        height: 70vh;
+        line-height: 125%;
 </style>
 
 </head>
@@ -3604,13 +3603,12 @@ $(document).ready(function() {
                     <div class="modal-content">
                       <div class="modal-header">
                         <h1 class="modal-title fs-5" id="editor_label">file editor</h1>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                       </div>
  
-                      <div class="modal-bodybg-success p-1 text-dark bg-opacity-10 rounded border border-success shadow m-3"
-                        style="--bs-border-opacity: .5;">
+                      <div class="modal-body">
                         <!-- editor embedded here -->
-                        <div id="editor"></div>
+                        <div id="editor" class="bg-success text-dark bg-opacity-10 rounded border border-success shadow"
+                        style="--bs-border-opacity: .5;"></div>
                         <!-- -->
                       </div>
 
