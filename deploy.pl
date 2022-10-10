@@ -3116,7 +3116,7 @@ $(document).ready(function() {
         </image>
       </div>
     </div>
-    % if ( ! app->minion->lock($game, 0) or $locks->{$game} eq 'true' ) {
+    % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
     <div class="col d-flex justify-content-end mb-2 shadow">
       <a class="ml-1 btn btn-sm btn-outline-danger
                justify-end" href="/minion/locks" role="button">task is running</a>
@@ -3286,35 +3286,81 @@ window.addEventListener("beforeunload", function(e) {
         % if ( $network->{'nodes'}{$node}{'status'} eq 'online' ) {
         <div class="col-12 col-md-3 shadow bg-medium mt-4 mb-2 rounded">
         <div class="media mt-2 mb-2">
-          <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png" alt="Generic placeholder image" height="80">
+          <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png"
+               alt="Generic placeholder image" height="80">
           <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
-          <%= $node %> </a><%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
-          <%= int($network->{'nodes'}{$node}{'rss'}/1024 + 0.5) %>M </img>
+            <%= $node %>
+          </a><%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
+            <%= int($network->{'nodes'}{$node}{'rss'}/1024 + 0.5) %>M
+          </img>
           <!--  games list  -->
-          <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
+
           % for my $game ( sort keys %{$network->{'games'}} ) {
             % next unless ( $network->{'games'}{$game}{'node'} eq $node );
             % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-            <a href="/log/<%= $network->{'games'}{$game}{'node'} %>/<%= $game %>"
-               class="fs-5 list-group-item-action list-group-item-success mb-1">
-              <span class="badge badge-primary text-dark"><%= $game %> </span>
-              <span style="float:right; mr-1" class="mr-1 fs-6">
-                <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % |
-                  <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M </small>
-                % } else {
-                <a href="/log/<%= $node %>/<%= $game %>" class="fs-5 list-group-item-action list-group-item-danger mb-1">
-                  <span class="badge badge-primary text-dark"><%= $game %> </span>
-                  <span style="float:right; mr-1" class="mr-1">
-                    <img src="/images/redX.png" alt="X" image" height="25">
-                % }
-                  </span>
+            <div class="bg-success text-dark bg-opacity-10 ">
+              <span>
+                <a href="/filemanager/<%= $game %>">
+                  <img class="zoom align-self-top mr-3" src="/images/mc_folders.png"
+                       alt="Generic placeholder image" height="35">
+                  </image>
                 </a>
-                % }
-              </div>
+              </span>
+
+              <span>
+                <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
+                  <img class="zoom align-self-top mr-3" src="/images/matrix_log.png"
+                       alt="Generic placeholder image" height="35">
+                  </image>
+                </a>
+              </span>
+
+               <span class="badge badge-primary text-dark fs-6">
+                 <small><%= $game %></small>
+               </span>
+
+               <span style="float:right; mr-1" class="mr-1 fs-6">
+                 <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % |
+                   <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M
+                 </small>
+               </span>
+            </div>
+            % } else {
+            <div class="bg-danger bg-opacity-10 ">
+              <span>
+                <a href="/filemanager/<%= $game %>">
+                  <img class="zoom align-self-top mr-3" src="/images/mc_folders.png"
+                       alt="Generic placeholder image" height="35">
+                  </image>
+                </a>
+              </span>
+
+              <span>
+                <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
+                  <img class="zoom align-self-top mr-3" src="/images/matrix_log.png"
+                       alt="Generic placeholder image" height="35">
+                  </image>
+                </a>
+              </span>
+
+               <span class="badge badge-primary text-dark fs-6">
+                 <small><%= $game %></small>
+               </span>
+
+                <span style="float:right; mr-1" class="mr-1">
+                  <img src="/images/redX.png" alt="X" image" height="25">
+                </span>
+              </a>
+            </span>
+            </div>
+            % }
+          % }
         </div>
-      </div>
+        </div>
       % }
     % }
+  </div>
+  </div>
       <hr>
       <div class="alert alert-danger alert-dismissible fade show" role="alert">
         <h4 class="alert-heading">offline nodes</h4>
@@ -3604,7 +3650,7 @@ $(document).ready(function() {
                       <div class="modal-header">
                         <h1 class="modal-title fs-5" id="editor_label">file editor</h1>
                       </div>
- 
+
                       <div class="modal-body">
                         <!-- editor embedded here -->
                         <div id="editor" class="bg-success text-dark bg-opacity-10 rounded border border-success shadow"
@@ -3669,9 +3715,10 @@ $(document).ready(function() {
 
 function browser_path(msg) {
     //var path = require('path');
-    var safe_input = msg.normalize('NFC').replace(/\/*(\.+(\/|\\|$))+/, '');
-    // safe_input = safe_input.replace(/(\.+(\/|\\|$))+/, '');
-    // alert(msg + " " + safe_input);
+    var safe_input = decodeURIComponent(msg);
+        safe_input = safe_input.normalize('NFC');
+        safe_input = safe_input.replace(/\/*(\.+(\/|\\|$))+/, '');
+
     socket.send(JSON.stringify({
         base_dir: safe_input
     }));
@@ -3682,7 +3729,6 @@ function get_file(msg) {
     socket.send(JSON.stringify({
         get_file: msg
     }));
-    // alert("preparing to fetch...\n" + decodeURIComponent(msg));
 };
 
 function delete_file(msg) {
