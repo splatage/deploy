@@ -3153,6 +3153,8 @@ $(document).ready(function() {
 %   } else {
         <span style="width: 6em;">
           <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="25">
+          </h4><b><%= $game %></b></h4>
+          </image>
         </span>
         <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
         offline
