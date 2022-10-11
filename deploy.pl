@@ -3114,20 +3114,52 @@ $(document).ready(function() {
   %# my $pool
   %= next unless ( $network->{'games'}{$game}{'pool'} eq $pool );
   <div class="row height: 40px">
-    <div class="col d-flex justify-content-start mb-2 shadow">
-      <div class="media">
+    <div class="col mb-2 shadow">
+
+      <span>
         <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
           <img class="zoom align-self-top mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
+      </span>
+      <span>
         <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
           <img class="zoom align-self-top mr-3" src="/images/matrix_log.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
+      </span>
+
+
+
+%   if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+      <span>
         <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="25">
-        </h4><%= $game %> </h4>
+           </h4><b><%= $game %></b></h4>
         </image>
-      </div>
+      </span>
+
+      <small>
+
+      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+        <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu
+      </span>
+      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+       <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB
+      </span>
+      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+       <%= $network->{'games'}{$game}{'node'} %>
+      </span>
+        </small>
+%   } else {
+        <span style="width: 6em;">
+          <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="25">
+        </span>
+        <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+        offline
+        </span>
+
+%   }
+
     </div>
     % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
     <div class="col d-flex justify-content-end mb-2 shadow">
