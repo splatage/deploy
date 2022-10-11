@@ -1,4 +1,3 @@
-
 use v5.28;
 
 use Mojolicious::Lite -signatures;
@@ -20,7 +19,9 @@ use POSIX        qw( strftime );
 use Time::Piece;
 use Time::Seconds;
 use Text::ParseWords;
-use utf8;
+use Encode qw(decode_utf8 encode_utf8);
+# use utf8;
+
 
 use strict;
 use warnings;
@@ -938,7 +939,7 @@ websocket '/filemanager/<game>-ws' => sub {
             if ( $filename =~ m/rc$/ )   { $icon = q(bi-gear);           }
             if ( $filename =~ m/gz$/ )  { $icon = q(bi-file-earmark-zip);   }
 
-            if ( $line =~ m/json"$/ && $file_content{$filename} ne '' ) {
+            if ( $filename =~ m/json$/ && $file_content{$filename} ne '' ) {
              $file_content{$filename} =~ s/":"/" => "/g;
              $file_content{$filename} =~ s/,([^{])/,\n    $1/g;
              $file_content{$filename} =~ s/,\{/,\n\{/g;
@@ -957,10 +958,10 @@ websocket '/filemanager/<game>-ws' => sub {
             my $preview = 'binary file or preview unavailable';
             if ( defined $file_content{$filename} ) {
                 $preview = qq(
-                    <h6>preview:</h6>
+                    <h6>file preview:</h6>
                     <div class="bg-success p-1 text-dark bg-opacity-10 rounded border border-success shadow"
                         style="--bs-border-opacity: .10;">
-                        <pre>$file_content{$filename}</pre>
+                        <code><pre>$file_content{$filename}</pre></code>
                     </div>
                 );
             }
@@ -1065,9 +1066,9 @@ websocket '/filemanager/<game>-ws' => sub {
             </div>
             <script> var here='$combined_crumbs'; <script>
         );
-
+        $content = decode_utf8($content);
         #$content = to_json{ base_dir => $content };
-        $self->send( to_json{ base_dir => $content } );
+        $self->send( to_json{ base_dir => $content }, {pretty => 1} );
     };
 
 
@@ -1103,7 +1104,7 @@ websocket '/filemanager/<game>-ws' => sub {
            $encoded = b64_encode $encoded;
 
         app->log->info("$encoded");
-        $self->send( to_json{ path => "download", filename => $encoded } ) ;
+        $self->send( to_json{ path => "download", filename => $encoded }, {pretty => 1} ) ;
        # $self->send( $content ) if $content;
     };
 
@@ -1169,7 +1170,7 @@ if (open FILE, '<:encoding(utf8)', "tmp/$id/$filename") {
 }
             app->log->info("file: $content");
 
-        $self->send( to_json{ editor_content => $content } ) if $content;
+        $self->send( to_json{ editor_content => $content }, {pretty => 1} ) if $content;
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
     };
@@ -2893,10 +2894,11 @@ __DATA__
 
 
 @@ layouts/template.html.ep
-<!doctype html>
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
+<head>
+<meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/css/bootstrap.min.css"
         rel="stylesheet"
@@ -3719,6 +3721,7 @@ $(document).ready(function() {
             if ( 'editor_content' in data ) {
                 console.log(data.editor_content);
                 editor.session.setValue(data.editor_content);
+                editor_content = data.editor_content;
                 // alert(data.editor_content);
             };
         };
@@ -3727,13 +3730,14 @@ $(document).ready(function() {
 
 function browser_path(msg) {
     //var path = require('path');
-    var safe_input = decodeURIComponent(msg);
-        safe_input = safe_input.normalize('NFC');
-        safe_input = safe_input.replace(/\/*(\.+(\/|\\|$))+/, '');
-
-    socket.send(JSON.stringify({
-        base_dir: safe_input
-    }));
+    var safe_input   = decodeURIComponent(msg);
+        safe_input   = safe_input.normalize('NFC');
+        safe_input   = safe_input.replace(/\/*(\.+(\/|\\|$))+/, '');
+    if ( safe_input !== "" ) {
+        socket.send(JSON.stringify({
+            base_dir: safe_input
+        }));
+    };
 };
 
 function get_file(msg) {
@@ -3763,11 +3767,11 @@ function upload_file(msg) {
 
 var editor;
 var current_file;
+
 function edit_file(msg) {
     if ( msg == 'save' ) {
         var content = editor.getValue();
-            alert( "saved: " + decodeURIComponent(current_file) +"\n" + content );
-
+        alert( "saved: " + decodeURIComponent(current_file) +"\n" + content );
         socket.send(JSON.stringify({
             save_editor_content: content,
             file_path: current_file
@@ -3787,7 +3791,7 @@ function edit_file(msg) {
         editor.session.setTabSize(4);
         editor.session.setUseSoftTabs(true);
         editor.setShowPrintMargin(false);
-        document.getElementById('editor').style.fontSize='1em';
+        document.getElementById('editor').style.fontSize='0.875em';
         _('editor_label').innerHTML = "file editor: " + decodeURIComponent(msg);
 
         socket.send(JSON.stringify({
@@ -3863,5 +3867,5 @@ function formatBytes(bytes, decimals = 2) {
 
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
-</script>
 
+</script>
