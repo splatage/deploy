@@ -2961,6 +2961,12 @@ body {
   background-attachment: fixed;
 }
 
+small b {
+  display: flex;
+  align-items: center;
+}
+
+
 .custom {
     width: 6em !important;
     height: 2.25em;
@@ -3162,7 +3168,7 @@ $(document).ready(function() {
 % layout 'template';
 
 <div class="container-fluid text-left">
-  <div class="alert alert-success fade show" role="alert">
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
     <h4 class="alert-heading">my games: <%= $pool %> pool </h4>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
@@ -3173,13 +3179,13 @@ $(document).ready(function() {
     <div class="col mb-2 shadow">
 
       <span>
-        <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
-          <img class="zoom align-self-top mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
+        <a href="/filemanager/<%= $game %>" >
+          <img class="zoom align-self-top mr-3 " src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
       </span>
       <span>
-        <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+        <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
           <img class="zoom align-self-top mr-3" src="/images/matrix_log.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
@@ -3435,7 +3441,7 @@ window.addEventListener("beforeunload", function(e) {
           % for my $game ( sort keys %{$network->{'games'}} ) {
             % next unless ( $network->{'games'}{$game}{'node'} eq $node );
             % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-            <div class="bg-success text-dark bg-opacity-10 no-wrap-container">
+            <div class="bg-success text-dark bg-opacity-10 no-wrap-container shadow">
               <span class="no-wrap">
                 <a href="/filemanager/<%= $game %>">
                   <img class="zoom align-self-top mr-1" src="/images/mc_folders.png"
@@ -3450,18 +3456,18 @@ window.addEventListener("beforeunload", function(e) {
                 </a>
               </span>
 
-               <span class="text-dark fs-6 no-wrap">
-                 <small><b><%= $game %></b></small>
+               <span style="float" class="text-dark fs-6 no-wrap align-self-top ">
+                 <b><small><%= $game %></small></b>
                </span>
 
-               <span style="float:right;" class="text-dark fs-7 no-wrap no-wrap-after">
+               <span style="float:right;" class="text-dark fs-7 no-wrap align-self-top">
                  <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % |
                    <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M
                  </small>
                </span>
             </div>
             % } else {
-            <div class="bg-danger bg-opacity-10 no-wrap-container">
+            <div class="bg-danger bg-opacity-10 no-wrap-container shadow">
               <span class="no-wrap">
                 <a href="/filemanager/<%= $game %>">
                   <img class="zoom align-self-top mr-1" src="/images/mc_folders.png"
@@ -3476,11 +3482,11 @@ window.addEventListener("beforeunload", function(e) {
                 </a>
               </span>
 
-               <span class="text-dark fs-6 no-wrap">
+               <span class="text-dark fs-6 no-wrap align-self-top ">
                  <small><b><%= $game %></b></small>
                </span>
 
-                <span style="float:right; mr-1" class="mr-1 no-wrap no-wrap-after">
+                <span style="float:right;" class="zoom align-self-top mr-1 no-wrap">
                   <img src="/images/redX.png" alt="X" image" height="25">
                 </span>
               </a>
@@ -3514,7 +3520,7 @@ window.addEventListener("beforeunload", function(e) {
                 % if ( $network->{'games'}{$game}{'node'} eq $node ) {
                 <a href="#" class="fs-5 list-group-item-action list-group-item-danger mb-1">
                   <span class="badge badge-primary text-dark"><%= $game %> </span>
-                  <span style="float:right; mr-1" class="mr-1">
+                  <span style="float:right; mr-1" class="zoom align-self-top mr-1">
                     <img src="/images/redX.png" alt="X" image" height="25">
                   </span>
                 </a>
