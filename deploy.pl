@@ -1772,8 +1772,7 @@ sub update {
     $release        = $settings->{$game}{release};
 
      # Get latest release version
-    my $project_url =
-        "https://api.papermc.io/v2/projects/$project/versions/$release/";
+    my $project_url = qq(https://api.papermc.io/v2/projects/$project/versions/$release/);
     my $ua          = Mojo::UserAgent->new();
     my $builds      = $ua->get($project_url)->result->json;
 
@@ -1804,6 +1803,7 @@ sub update {
     my @sha_file    = split( / /, $ssh->{'link'}->capture("$cmd") );
 
     if ( $sha_file[0] eq $sha256 ) {
+        app->log->info("$game $file_name update looks good");
         return "$file_name";
     }
     else {
