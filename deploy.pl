@@ -194,7 +194,7 @@ my $user_settings = readFromDB(
         hash_ref => 'true'
     );
 
-my $perms = readFromDB(
+my $perms        = readFromDB(
         table    => 'perms',
         column   => 'username',
         hash_ref => 'true'
@@ -364,26 +364,33 @@ app->minion->add_task(
         return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"} )
           unless app->minion->lock( $lock, 300 );
 
+        $job->note( '0_progress' => "bootstrapping environment" );
         my $bootstrap = bootStrap( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '1_bootstrap' => "$game $bootstrap" );
 
+        $job->note( '0_progress' => "updating jars" );
         my $update = update( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '2_update' => "$game $update" );
 
+        $job->note( '0_progress' => "first boot to generate configs" );
         my $boot = bootGame( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '3_boot' => "$game $boot" );
 
         sleep(60);
 
+        $job->note( '0_progress' => "closing server to edit configs" );
         my $halt = haltGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '4_halt' => "$game $halt" );
 
+        $job->note( '0_progress' => "editing configs" );
         my $rebootstrap = bootStrap( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '5_bootstrap' => "$game $rebootstrap" );
 
+        $job->note( '0_progress' => "second boot with new configs" );
         my $reboot = bootGame( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '6_boot' => "$game $reboot" );
 
+        $job->note( '0_progress' => "inserting into network" );
         my $regist = registerGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '7_register' => "$game $regist" );
 
@@ -429,15 +436,19 @@ app->minion->add_task(
         return $job->fail({ message => "Previous job $task for $game is still active. Refusing to proceed"})
           unless app->minion->lock( $lock, 300 );
 
+        $job->note( '0_progress' => "deploying gamefiles" );
         my $deploy = deployGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '1_deploy' => "$game $deploy" );
 
+        $job->note( '0_progress' => "fetching updated jar" );
         my $update = update( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '2_update' => "$game $update" );
 
+        $job->note( '0_progress' => "booting" );
         my $boot = bootGame( game => $game, server_bin => $update, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '3_boot' => "$game $boot" );
 
+        $job->note( '0_progress' => "inserting into network" );
         my $regist = registerGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '4_register' => "$game $regist" );
 
@@ -483,8 +494,11 @@ app->minion->add_task(
 
         $job->app->log->info("Job: $task $game begins");
 
+        $job->note( '0_progress' => "storing game" );
         my $store = storeGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '1_store' => "$game $store" );
+
+        $job->note( '0_progress' => "halting game" );
         my $halt = haltGame( game => $game, ssh_master    => $config->{'minion_ssh_master'} );
         $job->note( '2_halt' => "$game $halt" );
 
@@ -526,6 +540,7 @@ app->minion->add_task(
 
         $job->app->log->info("Job: $task $game begins");
 
+        $job->note( '0_progress' => "deploying game files" );
         my $output = deployGame( game => $game, ssh_master  => $config->{'minion_ssh_master'} );
         $job->note( '1_deploy' => "$game $output" );
 
@@ -2038,7 +2053,6 @@ sub checkIsOnline {
         hash_ref        => 'true'
     );
 
-
     my @nodes_to_check;
     my @live_nodes;
     my $temp_hash   = {};
@@ -2311,6 +2325,7 @@ sub sendCommand {
         node        => '',
         ip          => '',
         ssh_master  => '',
+        to_screen   => '',
         @_,
     );
 
@@ -2345,13 +2360,17 @@ sub sendCommand {
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );   #or die "Error establishing SSH" ;
 
-    $ssh->{'link'}->system(
-        "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
-    app->log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
+    unless ( $args{'to_screen'} eq '' ) {
+            app->log->debug("sendCommand $command to $game screen on $node");
+            $ssh->{'link'}->system( "screen -p 0 -S $game -X $command " );
+    }
+    else {
+        $ssh->{'link'}->system( "screen -p 0 -S $game -X eval 'stuff \"" . $command . "\"^M'" );
+        app->log->debug( "\[$ip\] $game: screen -p 0 -S $game -X eval 'stuff \""
           . $command
           . "\"^M'" );
+    }
     return;
-
 }
 
 
@@ -2442,22 +2461,50 @@ sub haltGame {
         @_,
     );
 
-    my $game = $args{'game'};
-    my $node = $args{'node'};
+    my $network     = checkIsOnline(
+        list_by     => 'node',
+        ssh_master  => $args{'ssh_master'}
+    );
 
-    app->log->info("Halting: $game");
+    my $game = $args{'game'};
+    my $node = $network->{'games'}{$game}{'node'};
+
+    app->log->info("Halting: $game on node $node");
 
     sendCommand( command => "stop^Mend", game => $game, node => $node, ssh_master => $args{'ssh_master'} );
 
-    sleep(20);
+    sleep(30);
 
-    unless ( checkIsOnline( list_by => 'node', node => '', game => $game, ssh_master => $args{'ssh_master'} ) ) {
+    $network        = checkIsOnline(
+        list_by     => 'node',
+        ssh_master  => $args{'ssh_master'}
+    );
+
+    my $pid         = $network->{'games'}{$game}{'pid'};
+
+    unless ( defined $pid ) {
         app->log->info("Halt $game succeeded");
         return "Halt $game succeeded";
     }
     else {
-        app->log->info("Failed to halt $game");
-        return "Failed to halt $game";
+        # potential zombie - force shutdown
+        app->log->warn("potential zombie - forcing shutdown of $game on $node with pid: $pid");
+
+        my $user            = $network->{'games'}{$game}{'user'};
+        my $ip              = $network->{'games'}{$game}{'ip'};
+
+        my $ssh             = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
+
+        app->log->warn("sending quit signal to screen container on $node");
+        sendCommand( command => "quit", game => $game, node => $node, ssh_master => $args{'ssh_master'}, to_screen => 'true' );
+
+        app->log->warn("sending kill signal to process $pid");
+        $ssh->{'link'}->system("kill -9 $pid");
+
+        app->log->warn("wiping any orphaned screen containers");
+        $ssh->{'link'}->system("screen -wipe");
+
+        return "unclean halt for $game. potential zombie";
     }
 }
 
