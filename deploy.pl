@@ -2488,23 +2488,22 @@ sub haltGame {
     }
     else {
         # potential zombie - force shutdown
-        app->log->warn("potential zombie - forcing shutdown of $game on $node with pid: $pid");
+        app->log->warn("$game found in zombie state, forcing cleanup on $node of pid $pid");
 
-        my $user            = $network->{'games'}{$game}{'user'};
-        my $ip              = $network->{'games'}{$game}{'ip'};
+        my $user    = $network->{'games'}{$game}{'user'};
+        my $ip      = $network->{'games'}{$game}{'ip'};
+        my $ssh     = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
 
-        my $ssh             = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
-
-        app->log->warn("sending quit signal to screen container on $node");
+        app->log->warn("removing screen container on $node");
         sendCommand( command => "quit", game => $game, node => $node, ssh_master => $args{'ssh_master'}, to_screen => 'true' );
 
-        app->log->warn("sending kill signal to process $pid");
+        app->log->warn("sending SIGKILL to process $pid");
         $ssh->{'link'}->system("kill -9 $pid");
 
         app->log->warn("wiping any orphaned screen containers");
         $ssh->{'link'}->system("screen -wipe");
 
-        return "unclean halt for $game. potential zombie";
+        return "unclean halt - $game was in a potential zombie state, check logs for details";
     }
 }
 
@@ -2900,8 +2899,6 @@ sub infoNode {
         $con_cmd .= $game_ports->{$game}{'port'} . " )' | wc -l;";
     }
 
-    print "$con_cmd\n";
-
     my $iperf = "
 -------------------------------------
 Field      Meaning of Non-Zero Values
@@ -2965,7 +2962,8 @@ body {
 }
 
 .custom {
-    width: 78px !important;
+    width: 6em !important;
+    height: 2.25em;
     margin-right: 3px;
 }
 
@@ -3002,11 +3000,23 @@ body {
     transform: scale(1.5);
 }
 html {
-
   scroll-behavior: auto !important;
-
 }
 
+.no-wrap-container {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    width: 100%;
+}
+.no-wrap {
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+}
 
 </style>
 </head>
@@ -3043,7 +3053,6 @@ html {
         <%= $flash_error %>
     </div>
     % }
-
 
 <nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark ">
   <div class="container-fluid">
@@ -3153,7 +3162,7 @@ $(document).ready(function() {
 % layout 'template';
 
 <div class="container-fluid text-left">
-  <div class="alert alert-success alert-dismissible fade show" role="alert">
+  <div class="alert alert-success fade show" role="alert">
     <h4 class="alert-heading">my games: <%= $pool %> pool </h4>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
@@ -3187,13 +3196,13 @@ $(document).ready(function() {
 
       <small>
 
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
         <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu
       </span>
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
        <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB
       </span>
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
        <%= $network->{'games'}{$game}{'node'} %>
       </span>
         </small>
@@ -3213,7 +3222,7 @@ $(document).ready(function() {
     % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
     <div class="col d-flex justify-content-end mb-2 shadow">
       <a class="ml-1 btn btn-sm btn-outline-danger
-               justify-end" href="/minion/locks" role="button">task is running</a>
+               justify-end custom" href="/minion/locks" role="button">busy</a>
     </div>
   </div>
   % next; }
@@ -3346,7 +3355,7 @@ window.addEventListener("beforeunload", function(e) {
         % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
           <div class="col d-flex justify-content-end mb-2 shadow">
             <a class="ml-1 btn btn-sm btn-outline-danger
-               justify-end" href="/minion/locks"      role="button">task is running</a>
+               justify-end custom" href="/minion/locks"      role="button">busy</a>
           </div>
           </div>
         % next; }
@@ -3415,64 +3424,63 @@ window.addEventListener("beforeunload", function(e) {
                alt="Generic placeholder image" height="80">
           <a href="/node/<%= $node %>" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6">
             <%= $node %>
-          </a><%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
+          </a>
+          <span>
+          <%= int($network->{'nodes'}{$node}{'pcpu'} + 0.5) %>% |
             <%= int($network->{'nodes'}{$node}{'rss'}/1024 + 0.5) %>M
+          </span>
           </img>
           <!--  games list  -->
 
           % for my $game ( sort keys %{$network->{'games'}} ) {
             % next unless ( $network->{'games'}{$game}{'node'} eq $node );
             % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-            <div class="bg-success text-dark bg-opacity-10 ">
-              <span>
+            <div class="bg-success text-dark bg-opacity-10 no-wrap-container">
+              <span class="no-wrap">
                 <a href="/filemanager/<%= $game %>">
-                  <img class="zoom align-self-top mr-3" src="/images/mc_folders.png"
+                  <img class="zoom align-self-top mr-1" src="/images/mc_folders.png"
                        alt="Generic placeholder image" height="35">
                   </image>
                 </a>
-              </span>
 
-              <span>
                 <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
-                  <img class="zoom align-self-top mr-3" src="/images/matrix_log.png"
+                  <img class="zoom align-self-top mr-1" src="/images/matrix_log.png"
                        alt="Generic placeholder image" height="35">
                   </image>
                 </a>
               </span>
 
-               <span class="badge badge-primary text-dark fs-6">
-                 <small><%= $game %></small>
+               <span class="text-dark fs-6 no-wrap">
+                 <small><b><%= $game %></b></small>
                </span>
 
-               <span style="float:right; mr-1" class="mr-1 fs-6">
+               <span style="float:right;" class="text-dark fs-7 no-wrap no-wrap-after">
                  <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % |
                    <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M
                  </small>
                </span>
             </div>
             % } else {
-            <div class="bg-danger bg-opacity-10 ">
-              <span>
+            <div class="bg-danger bg-opacity-10 no-wrap-container">
+              <span class="no-wrap">
                 <a href="/filemanager/<%= $game %>">
-                  <img class="zoom align-self-top mr-3" src="/images/mc_folders.png"
+                  <img class="zoom align-self-top mr-1" src="/images/mc_folders.png"
                        alt="Generic placeholder image" height="35">
                   </image>
                 </a>
-              </span>
 
-              <span>
                 <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
-                  <img class="zoom align-self-top mr-3" src="/images/matrix_log.png"
+                  <img class="zoom align-self-top mr-1" src="/images/matrix_log.png"
                        alt="Generic placeholder image" height="35">
                   </image>
                 </a>
               </span>
 
-               <span class="badge badge-primary text-dark fs-6">
-                 <small><%= $game %></small>
+               <span class="text-dark fs-6 no-wrap">
+                 <small><b><%= $game %></b></small>
                </span>
 
-                <span style="float:right; mr-1" class="mr-1">
+                <span style="float:right; mr-1" class="mr-1 no-wrap no-wrap-after">
                   <img src="/images/redX.png" alt="X" image" height="25">
                 </span>
               </a>
@@ -3497,7 +3505,8 @@ window.addEventListener("beforeunload", function(e) {
           % if ( $network->{'nodes'}{$node}{'status'} eq 'offline' ) {
           <div class="col-12 col-md-3 shadow bg-medium mt-4 rounded">
             <div class="media mt-2">
-              <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png" alt="Generic placeholder image" height="80">
+              <img class="align-self-top mr-1 mt-2 mb-2" src="/images/application-server-.png"
+                   alt="Generic placeholder image" height="80">
               <a href="#" class="position-absolute bottom-10 end-10 translate-middle badge bg-dark fs-6"><%= $node %> </a>
               </img>
               <div class="bg-success text-dark bg-opacity-10 list-group list-group-flush">
@@ -3676,8 +3685,8 @@ $(document).ready(function() {
       </div>
       % } else {
       <div class="col d-flex justify-content-end mb-2 shadow">
-        <a class="ml-1 btn btn-sm btn-outline-danger
-                        justify-end" href="/minion/locks" role="button">task is running</a>
+        <a class="ml-1 btn btn-sm btn-outline-danger justify-end custom"
+            href="/minion/locks" role="button">busy</a>
       </div>
       % }
     </div>
