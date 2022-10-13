@@ -883,14 +883,16 @@ websocket '/filemanager/<game>-ws' => sub {
         my $encoded_path = url_escape $path;
         app->log->debug("$game path: $path");
 
-        my $ls_cmd      = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' && );
+        my $ls_cmd      = qq([ -d '$home_dir/$path' ] || mkdir -p '$home_dir/$path'; cd '$home_dir/$path' && );
            $ls_cmd     .=  q(stat * .* --format '%F,%n,%Y,%s,%W' | sort -k1 -k2 -k3);
 
         my $files       = $ssh->{'link'}->capture("$ls_cmd") ; #if $hash->{path};
 
         my $file_cmd    = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' );
-           $file_cmd   .= qq(&& find * -maxdepth 0 -type f -exec grep -IlH . {} + );
-           $file_cmd   .= qq(| xargs -d '\n' head -v -n 15);
+           $file_cmd   .= qq/&& find * -maxdepth 0 -type f  | grep -Ev '(z|jar|mca)\$' | xargs grep -IlH . /;
+           $file_cmd   .= qq(| xargs -d '\\n' head -v -n 15);
+
+        app->log->info($file_cmd);
 
         my $head        =  $ssh->{'link'}->capture("$file_cmd");
            $head        =~ s/\n/<newline>/g;
@@ -984,7 +986,7 @@ websocket '/filemanager/<game>-ws' => sub {
             if ( $type =~ m/^directory/ ) {
                 $icon = q(bi-folder-fill); $color = 'green';
                 $content .= qq(
-                <span class="col-md-4">
+                <span class="col-md-4 no_wrap">
                     <button class="btn" data-bs-target="#$id style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;"
                      type="submit" id="$id" value="$path/$filename" onclick="browser_path('$path/$filename')">
                     <i class="bi $icon" style="font-size: 1.75rem; color: $color;"></i>
@@ -997,7 +999,7 @@ websocket '/filemanager/<game>-ws' => sub {
             my $modal = 'editor_m';
             my $label = 'editor_label';
             $content .= qq(
-                <span class="col-md-4">
+                <span class="col-md-4 no_wrap">
                     <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
                         aria-controls="$id" style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;">
                     <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;"></i>
@@ -1491,9 +1493,28 @@ websocket '/log/:node/<game>-ws' => sub {
         $logdata->{'content'} =~ s/([^\n]{79})\n/$1/g;                  # Vertial term wraps at 80 characters
         $logdata->{'content'} =~ s/([^\n]{60})(\[[0-9:]{8})/$1\n$2/g;   # Newline for log timestamps
 
-        foreach ( split( /\n/, ( $logdata->{'content'} ) ) ) {
-            $content = "<div>" . $_ . "</div>\n" . $content unless ( $_ eq '' );
+        foreach my $line ( split( /\n/, ( $logdata->{'content'} ) ) ) {
+            next if ( $line eq '' );
+
+            # Time and log level
+            $line =~ s/(\[[^]]+INFO\]:*)/<span style="color: #4169E1; font-style: italic;"> $1 <\/span>/;
+            $line =~ s/(\[[^]]+WARN\]:*)/<span style="color: #FFA500; font-style: italic;"> $1 <\/span>/;
+            $line =~ s/(\[[^]]+ERROR\]:*)/<span style="background: #8B0000; color: #FFFFFF; font-style: italic;"> $1 <\/span>/;
+            # Plugin Name
+            $line =~ s/>( \[\S+\])/><span style="color: #41FF00;"> $1 <\/span> /;
+            # error dump lines
+            $line =~ s/^([ \t]+at\s.+)/<span style="color: #2F4F4F; font-style: italic;"> $1 <\/span>/;
+            # Player Logins
+            $line =~ s/(\w*\[[^]]*\/\d+\.\d+\.\d+\.\d+\:\d+[^]]*\])/<span style="color: #FFFAFA;"> $1 <\/span>/;
+            #player commands
+            $line =~ s/([^><]+ command:)([^><]+)$/<span style="color: #FFFFFF;"> $1 <\/span><span style="background:#556B2F; color: #00FFFF;"> $2 <\/span>/;
+            # End of line text
+            $line =~ s/([^><]+)$/<span style="color: #8FBC8F;"> $1 <\/span>/;
+
+            # $line =~ s/\s(\[.+/INFO\]: )((\[CHAT\] (.+:))|(\[.+\])?)/GG $1 $2 $3 /;
+            $content = "<div>" . $line . "</div>\n" . $content
         };
+
         $logdata->{'content'} = '';
         $screenlog = $logdata->{'screenlog'};
         $line_index = $logdata->{'line_index'};
@@ -1666,37 +1687,6 @@ sub getMinionLocks {
         }
     }
     return $minion_locks;
-}
-
-sub updatePage_game {
-    my %args = (
-       line_index   => '',
-       iteration    => '',
-       logdata      => '',
-       user         => '',
-       game         => '',
-       file         => '',
-       new_content  => '',
-    @_ );
-
-    #open(FILE, $args{'logdata'} );
-
-    my $iteration = 0;
-    my $new_content = '';
-
-    foreach ( split( /\n/, ( $args{'logdata'} ) ) ) {
-        ++$iteration;
-
-        #if ( $iteration > $args{'line_index'} ) {
-            ++$args{'line_index'};
-            $new_content = $new_content . '<div>' . $_ . "</div>\n";
-        #}
-    }
-
-    $args{'iteration'}   = $iteration;
-    $args{'new_content'} = $new_content;
-
-    return \%args;
 }
 
 
@@ -2272,52 +2262,6 @@ sub deregisterGame {
 }
 
 
-sub getFiles {
-    my %args = (
-        user => '',
-        ip   => '',
-        game => '',
-        @_,
-    );
-
-    my $game = $args{'game'};
-
-    my $settings = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        field    => 'name',
-        value    => $game,
-        hash_ref => 'true'
-    );
-
-    my %settings = %$settings;
-
-    my $snode = $settings->{$game}{'store'};
-    my $suser = $settings->{$game}{'store_usr'};
-    my $spath = $settings->{$game}{'store_path'};
-
-    my $sip = readFromDB(
-        table    => 'nodes',
-        column   => 'ip',
-        field    => 'name',
-        value    => $snode,
-        hash_ref => 'false'
-    );
-
-    my $results = {};
-    my %results = %$results;
-
-    my $ssh = connectSSH( user => $suser, ip => $sip, ssh_master => $args{'ssh_master'} );
-    return 1 if $ssh->{'error'};
-
-
-    my @files = $ssh->{'link'}->capture("cd $spath; find $game -type f ");
-    chomp(@files);
-
-    return \@files;
-}
-
-
 sub sendCommand {
     my %args = (
         game        => '',
@@ -2630,32 +2574,25 @@ sub bootGame {
     return "$game is already online"
       if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) );
 
-    my $settings = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        field    => 'name',
-        value    => $game,
-        hash_ref => 'true'
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'true'
     );
 
-    my %settings = %$settings;
+    my %settings    = %$settings;
 
-    my $ip = readFromDB(
-        table    => 'nodes',
-        column   => 'ip',
-        field    => 'name',
-        value    => $settings->{$game}{'node'},
-        hash_ref => 'false'
+    my $ip          = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $settings->{$game}{'node'},
+        hash_ref    => 'false'
     );
 
-    my $path = qq( $settings->{$game}{'node_path'}/$game/game_files );
-    my $boot_strap;
-       $boot_strap  = qq( mkdir -p $path/logs && cd $path  && );
-       $boot_strap .= qq( echo "eula=true" > eula.txt && );
-       $boot_strap .= qq( touch logs/gc.log && );
-       $boot_strap .= qq( [ -f spigot.yml ] && sed -i '/bungeecord:/s/false/true/' spigot.yml && );
-       $boot_strap .= qq( [ -f paper.yml  ] && sed -i '/bungee-online-mode:/s/false/true/' paper.yml && );
-       $boot_strap .= qq( [ -f server.properties ] && sed -i '/online-mode=/s/true/false' server.properties  );
+    my $path        = qq( $settings->{$game}{'node_path'}/$game/game_files );
 
     $settings->{$game}{'java_flags'} =~ s/^'//;
     $settings->{$game}{'java_flags'} =~ s/'$//;
@@ -2672,7 +2609,7 @@ sub bootGame {
        $invocation =~ s/\n+/ /g;s/  / /g;
 
     app->log->debug("$invocation");
-    $user = $settings->{$game}{'node_usr'};
+    $user   = $settings->{$game}{'node_usr'};
 
     my $ssh = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
     return $ssh->{'error'} if $ssh->{'error'};
@@ -2697,10 +2634,10 @@ sub bootGame {
 }
 
 sub bootStrap {
-    my %args = (
-        game       => '',
-        server_bin => '',
-        upgrade    => '',
+    my %args        = (
+        game        => '',
+        server_bin  => '',
+        upgrade     => '',
         @_,
     );
 
@@ -2709,31 +2646,32 @@ sub bootStrap {
     return "$game is already online"
       if ( checkIsOnline( list_by => 'game', node => '', game => $game, ssh_master => $args{'ssh_master'} ) );
 
-    my $settings = readFromDB(
-        table    => 'games',
-        column   => 'name',
-        field    => 'name',
-        value    => $game,
-        hash_ref => 'true'
+    my $settings    = readFromDB(
+        table       => 'games',
+        column      => 'name',
+        field       => 'name',
+        value       => $game,
+        hash_ref    => 'true'
     );
 
-    my $ip = readFromDB(
-        table    => 'nodes',
-        column   => 'ip',
-        field    => 'name',
-        value    => $settings->{$game}{'node'},
-        hash_ref => 'false'
+    my $ip          = readFromDB(
+        table       => 'nodes',
+        column      => 'ip',
+        field       => 'name',
+        value       => $settings->{$game}{'node'},
+        hash_ref    => 'false'
     );
 
     app->log->info("bootstrap $game begin");
 
-    my $user = $settings->{$game}{'node_usr'};
-    my $ssh  = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
+    my $user    = $settings->{$game}{'node_usr'};
+    my $ssh     = connectSSH( user => $user, ip => $ip, ssh_master => $args{'ssh_master'} );
+
     return $ssh->{'error'} if $ssh->{'error'};
     return $ssh->{'debug'} if $ssh->{'debug'};
 
 
-    my $path = qq($settings->{$game}{'node_path'}/$game/game_files);
+    my $path    = qq($settings->{$game}{'node_path'}/$game/game_files);
 
     my $boot_strap;
     my $task;
@@ -2770,9 +2708,9 @@ sub bootStrap {
        $output  .= $ssh->{'link'}->capture("$boot_strap");
        app->log->info("$task success $boot_strap");
 
-    $task       = "bootstrap environment prepared";
+    $task        = "bootstrap environment prepared";
        app->log->info("$task");
-       $output .= $task;
+       $output  .= $task;
 
        return $output;
 }
@@ -3024,6 +2962,14 @@ html {
     max-width: 40%;
 }
 
+.no-wrap_start {
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+    direction: rtl;
+}
 </style>
 </head>
 
@@ -3659,36 +3605,42 @@ $(document).ready(function() {
 <div class="input-group input-group-sm mb-3">
   <button class="btn btn-primary" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasExample" aria-controls="offcanvasExample"> Options </button>
   <!-- Side Panel -->
-  <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="offcanvasExample" aria-labelledby="offcanvasExampleLabel">
+  <div class="offcanvas offcanvas-start" tabindex="-1" id="offcanvasExample" aria-labelledby="offcanvasExampleLabel">
     <div class="offcanvas-header">
       <h5 class="offcanvas-title" id="offcanvasExampleLabel">Control Options</h5>
       <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
     </div>
     <div class="offcanvas-body">
     % if (app->minion->lock($game, 0)) {
-    <h6 class="mt-3">storage</h6>
+    <h6 class="mt-3">storage and staging</h6>
       <hr>
-      <div class="list-group">
-        <a href="/store/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">store </a>
-        <a href="/deploy/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">deploy </a>
+      <div class="list-group list-group-horizontal">
+        <a href="/store/<%= $game %>/<%= $node %>" class="flex-fill list-group-item list-group-item-secondary">store </a>
+        <a href="/deploy/<%= $game %>/<%= $node %>" class="flex-fill list-group-item list-group-item-secondary">deploy </a>
       </div>
       <h6 class="mt-3">network</h6>
       <hr>
-      <div class="list-group">
+      <div class="list-group list-group-horizontal">
         <a href="/drop/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">drop </a>
         <a href="/deploy/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-secondary">link </a>
       </div>
       <h6 class="mt-3">power</h6>
       <hr>
-      <div class="list-group">
+      <div class="list-group list-group-horizontal">
         <a href="/halt/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">halt </a>
         <a href="/boot/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">boot </a>
       </div>
       <h6 class="mt-3">admin</h6>
       <hr>
-      <div class="list-group">
-        <a href="/bootstrap/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">bootstrap </a>
+      <div class="list-group list-group-horizontal">
+        <a href="/bootstrap/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">bootstrap</a>
+        <a href="/upgrade/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-danger">nuke</a>
       </div>
+      <div class="list-group list-group-horizontal">
+        <a href="/bootstrap/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">update plugins</a>
+        <a href="/upgrade/<%= $game %>/<%= $node %>" class="list-group-item list-group-item-action list-group-item-dark">upgrade world</a>
+      </div>
+
       % } else {
       <div class="col d-flex justify-content-end mb-2 shadow">
         <a class="ml-1 btn btn-sm btn-outline-danger justify-end custom"
