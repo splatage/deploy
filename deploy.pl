@@ -1264,6 +1264,12 @@ get '/filemanager/:game'  => sub {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
     my $pool        = $perms->{$username}{'pool'};
+    my $network     = checkIsOnline(
+        list_by     => 'node',
+        node        => $node,
+        game        => '',
+        ssh_master  => $config->{'ssh_master'}
+    );
 
     unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
@@ -1276,7 +1282,8 @@ get '/filemanager/:game'  => sub {
         is_admin    => $is_admin,
         username    => $username,
         pool        => $pool,
-        game        => $game
+        game        => $game,
+        network     => $network
      );
     $c->render( template => $template );
 };
@@ -1508,8 +1515,11 @@ websocket '/log/:node/<game>-ws' => sub {
             $line =~ s/(\w*\[[^]]*\/\d+\.\d+\.\d+\.\d+\:\d+[^]]*\])/<span style="color: #FFFAFA;"> $1 <\/span>/;
             #player commands
             $line =~ s/([^><]+ command:)([^><]+)$/<span style="color: #FFFFFF;"> $1 <\/span><span style="background:#556B2F; color: #00FFFF;"> $2 <\/span>/;
+           # commands issued at start of line
+            $line =~ s/^(>[^><]+)$/<span style="color: #FFFFFF;"> $1 <\/span>/;
             # End of line text
             $line =~ s/([^><]+)$/<span style="color: #8FBC8F;"> $1 <\/span>/;
+
 
             # $line =~ s/\s(\[.+/INFO\]: )((\[CHAT\] (.+:))|(\[.+\])?)/GG $1 $2 $3 /;
             $content = "<div>" . $line . "</div>\n" . $content
@@ -1561,6 +1571,13 @@ get '/log/:node/:game' => sub {
     my $is_admin    = $perms->{$username}{'admin'};
     my $pool        = $perms->{$username}{'pool'};
 
+    my $network     = checkIsOnline(
+        list_by     => 'node',
+        node        => $node,
+        game        => '',
+        ssh_master  => $config->{'ssh_master'}
+    );
+
     unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
         $c->flash( error => "you dont have permission to do that" );
         app->log->warn("IDS: $username from $ip requested $template $game ");
@@ -1574,7 +1591,8 @@ get '/log/:node/:game' => sub {
         game        => $game,
         is_admin    => $is_admin,
         username    => $username,
-        pool        => $pool
+        pool        => $pool,
+        network     => $network
     );
 
     $c->render(
@@ -2935,8 +2953,6 @@ small b {
 .zoom {
     padding: 1px;
     transition: transform .2s; /* Animation */
-    width: 30px;
-    height: 30px;
     margin: 0 auto;
 }
 
@@ -3390,19 +3406,19 @@ window.addEventListener("beforeunload", function(e) {
             <div class="bg-success text-dark bg-opacity-10 no-wrap-container shadow">
               <span class="no-wrap">
                 <a href="/filemanager/<%= $game %>">
-                  <img class="zoom align-self-top mr-1" src="/images/mc_folders.png"
-                       alt="Generic placeholder image" height="35">
+                  <img class="zoom mr-1" src="/images/mc_folders.png"
+                       alt="Generic placeholder image" height="30">
                   </image>
                 </a>
 
                 <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
-                  <img class="zoom align-self-top mr-1" src="/images/matrix_log.png"
-                       alt="Generic placeholder image" height="35">
+                  <img class="zoom mr-1" src="/images/matrix_log.png"
+                       alt="Generic placeholder image" height="30">
                   </image>
                 </a>
               </span>
 
-               <span style="float" class="text-dark fs-6 no-wrap align-self-top ">
+               <span style="float" class="text-dark fs-6 no-wrap">
                  <b><small><%= $game %></small></b>
                </span>
 
@@ -3416,23 +3432,23 @@ window.addEventListener("beforeunload", function(e) {
             <div class="bg-danger bg-opacity-10 no-wrap-container shadow">
               <span class="no-wrap">
                 <a href="/filemanager/<%= $game %>">
-                  <img class="zoom align-self-top mr-1" src="/images/mc_folders.png"
-                       alt="Generic placeholder image" height="35">
+                  <img class="zoom mr-1" src="/images/mc_folders.png"
+                       alt="Generic placeholder image" height="30">
                   </image>
                 </a>
 
                 <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
-                  <img class="zoom align-self-top mr-1" src="/images/matrix_log.png"
-                       alt="Generic placeholder image" height="35">
+                  <img class="zoom mr-1" src="/images/matrix_log.png"
+                       alt="Generic placeholder image" height="30">
                   </image>
                 </a>
               </span>
 
-               <span class="text-dark fs-6 no-wrap align-self-top ">
+               <span class="text-dark fs-6 no-wrap">
                  <small><b><%= $game %></b></small>
                </span>
 
-                <span style="float:right;" class="zoom align-self-top mr-1 no-wrap">
+                <span style="float:right;" class="zoom mr-1 no-wrap">
                   <img src="/images/redX.png" alt="X" image" height="25">
                 </span>
               </a>
@@ -3597,7 +3613,19 @@ $(document).ready(function() {
 
 <div class="container-fluid text-left">
   <div class="alert alert-success alert-dismissible fade show" role="alert">
-    <h4 class="alert-heading">command console: <%= $game %> on <%= $node %> </h4>
+    <h4 class="alert-heading">
+      <a href="/filemanager/<%= $game %>">
+        <img class="zoom " src="/images/mc_folders.png"
+             alt="Generic placeholder image" height="35px">
+        </image>
+      </a>
+      <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
+        <img class="zoom" src="/images/matrix_log.png"
+             alt="Generic placeholder image" height="35px">
+        </image>
+      </a>
+      <%= $game %> command console
+    </h4>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
   <div id='command-content' class="text-wrap container-sm text-break"> </div>
@@ -3722,8 +3750,17 @@ $(document).ready(function() {
 <div class="container-fluid text-left">
   <div class="alert alert-success alert-dismissible show" role="alert">
     <h4 class="alert-heading">
-      <img class="align-self-left mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="50">
-      </image><%= $game %> staging area manager
+      <a href="/filemanager/<%= $game %>">
+        <img class="zoom " src="/images/mc_folders.png"
+             alt="Generic placeholder image" height="35px">
+        </image>
+      </a>
+      <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
+        <img class="zoom" src="/images/matrix_log.png"
+             alt="Generic placeholder image" height="35px">
+        </image>
+      </a>
+      <%= $game %> staging area
     </h4>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
