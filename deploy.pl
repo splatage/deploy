@@ -712,31 +712,17 @@ get '/pool' => sub {
     my $is_admin    = $perms->{$username}{'admin'};
     my $pool        = $perms->{$username}{'pool'};
 
-    my $network->{'nodes'} = readFromDB(
-        table           => 'nodes',
-        column          => 'name',
-        hash_ref        => 'true'
-    );
-
-    $network->{'games'} = readFromDB(
-        table           => 'games',
-        column          => 'name',
-        hash_ref        => 'true'
-    );
-
-    my $jobs = app->minion->jobs(
-        {
-            queues => ['default'],
-            states => [ 'active', 'locked' ],
-            tasks  => [ 'boot',   'halt' ]
-        }
+    my $network = checkIsOnline(
+        list_by => 'node',
+        node    => '',
+        game    => '',
+        ssh_master => $config->{'ssh_master'},
     );
 
     my $locks = getMinionLocks();
 
     $c->stash(
         network     => $network,
-        history     => $jobs,
         perms       => $perms,
         is_admin    => $is_admin,
         username    => $username,
@@ -805,20 +791,11 @@ get '/node/:node' => sub {
         hash_ref    => 'false'
     );
 
-    my $jobs = app->minion->jobs(
-        {
-            queues => ['default'],
-            states => [ 'active', 'locked' ],
-            tasks  => [ 'boot',   'halt' ]
-        }
-    );
-
     my $locks = getMinionLocks();
 
     $c->render(
         template    => 'node',
         network     => $network,
-        history     => $jobs,
         perms       => $perms,
         is_admin    => $is_admin,
         username    => $username,
@@ -1505,7 +1482,7 @@ websocket '/log/:node/<game>-ws' => sub {
 
         foreach my $line ( split( /\n/, ( $logdata->{'content'} ) ) ) {
             next if ( $line eq '' );
-
+            # Syntax highlighting
             # Time and log level
             $line =~ s/(\[[^]]+INFO\]:*)/<span style="color: #4169E1; font-style: italic;"> $1 <\/span>/;
             $line =~ s/(\[[^]]+WARN\]:*)/<span style="color: #FFA500; font-style: italic;"> $1 <\/span>/;
@@ -1517,7 +1494,7 @@ websocket '/log/:node/<game>-ws' => sub {
             # Player Logins
             $line =~ s/(\w*\[[^]]*\/\d+\.\d+\.\d+\.\d+\:\d+[^]]*\])/<span style="color: #FFFAFA;"> $1 <\/span>/;
             #player commands
-            $line =~ s/([^><]+ command:)([^><]+)$/<span style="color: #FFFFFF;"> $1 <\/span><span style="background:#556B2F; color: #00FFFF;"> $2 <\/span>/;
+            $line =~ s/([^><]+ command:)([^><]+)$/<span style="color: #FFFFFF;"> $1<\/span><span style="background:#556B2F; color: #00FFFF;"> $2&nbsp;<\/span>/;
            # commands issued at start of line
             $line =~ s/^(>[^><]+)$/<span style="color: #FFFFFF;"> $1 <\/span>/;
             # End of line text
@@ -2989,6 +2966,19 @@ html {
     max-width: 40%;
     direction: rtl;
 }
+
+.navbar {
+    --bs-navbar-padding-y: 1px;
+    --bs-navbar-brand-padding-y: 1px;
+    --bs-gutter-x: 1.5rem;
+}
+
+.alert {
+    --bs-alert-padding-y: .5rem;
+}
+.container-fluid {
+    --bs-gutter-x: 1.5rem;
+}
 </style>
 </head>
 
@@ -3025,10 +3015,11 @@ html {
     </div>
     % }
 
-<nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark ">
+<nav class="navbar navbar-expand-lg static-top sticky-top navbar-dark bg-dark
+     style="--bs-navbar-padding-y: 0px; --bs-navbar-brand-padding-y: 0px;">
   <div class="container-fluid">
         <a class="navbar-brand" href="/">
-          <img src="/images/logo.png" alt="" height="50">
+          <img src="/images/logo.png" alt="" height="45">
           <small><%= $username %></small>
        </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01"
@@ -3083,7 +3074,7 @@ html {
 </nav>
 
   <div height: 100%;>
-    <main class="container-xl bg-secondary shadow-lg mb-1 mt-1 p-3 bg-body rounded" style="--bs-bg-opacity: .90;">
+    <main class="container-xl bg-secondary shadow-lg mb-1 mt-1 p-2 bg-body rounded" style="--bs-bg-opacity: .90;">
         %= content
           <div class="d-flex align-items-center">
             <strong class="spinner-hide">Loading...</strong>
@@ -3140,9 +3131,12 @@ $(document).ready(function() {
   % for my $game (sort keys %{$network->{'games'}} ) {
   %# my $pool
   %= next unless ( $network->{'games'}{$game}{'pool'} eq $pool );
-  <div class="row height: 40px">
-    <div class="col mb-2 shadow">
-
+  <div class="row height: 35px">
+  % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+    <div class="col mb-2 shadow bg-success bg-opacity-10">
+  % } else {
+      <div class="col mb-2 shadow bg-danger bg-opacity-10">
+  % }
       <span>
         <a href="/filemanager/<%= $game %>" >
           <img class="zoom align-self-top mr-3 " src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
@@ -3156,72 +3150,80 @@ $(document).ready(function() {
         </a>
       </span>
 
-
-
-%   if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+  % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
       <span>
         <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="25">
            </h4><b><%= $game %></b></h4>
         </image>
       </span>
 
-      <small>
+      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
+        <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu</small>
+      </span>
+      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
+       <small><%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB</small>
+      </span>
+      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
+       <small><%= $network->{'games'}{$game}{'node'} %></small>
+      </span>
 
-      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
-        <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu
-      </span>
-      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
-       <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB
-      </span>
-      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
-       <%= $network->{'games'}{$game}{'node'} %>
-      </span>
-        </small>
-%   } else {
+  % } else {
         <span style="width: 6em;">
           <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="25">
           </h4><b><%= $game %></b></h4>
           </image>
         </span>
         <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-        offline
+        <small>offline</small>
         </span>
 
-%   }
+  % }
 
     </div>
     % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
-    <div class="col d-flex justify-content-end mb-2 shadow">
+      % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-success bg-opacity-10">
+      % } else {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-danger bg-opacity-10">
+      % }
       <a class="ml-1 btn btn-sm btn-outline-danger
-               justify-end custom" href="/minion/locks" role="button">busy</a>
+               justify-content-end custom" href="/minion/locks" role="button">busy</a>
     </div>
   </div>
   % next; }
   % if ( defined $network->{'games'}{$game}{'pid'} ) {
-  <div class="col d-flex justify-content-end mb-2 shadow">
+    % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-success bg-opacity-10">
+    % } else {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-danger bg-opacity-10">
+    % }
     <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
+              justify-content-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
               href="/store/<%= $game %>/<%= $game %>" role="button">store</a>
     <a class="ml-1 btn btn-sm btn-outline-info custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
+              justify-content-end" data-toggle="tooltip" data-placement="top" title="connect into the network"
               href="/link/<%= $game %>/<%= $game %>" role="button">link</a>
     <a class="ml-1 btn btn-sm btn-outline-info custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              justify-content-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
               href="/drop/<%= $game %>/<%= $game %>" role="button">drop</a>
     <a class="ml-1 btn btn-sm btn-danger     custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
+              justify-content-end" data-toggle="tooltip" data-placement="top" title="shutdown and copy to storage"
               href="/halt/<%= $game %>/<%= $game %>" role="button">halt</a>
   </div>
-  % } else {
-  <div class="col d-flex justify-content-end mb-2 shadow">
+    % } else {
+      % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-success bg-opacity-10">
+      % } else {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-danger bg-opacity-10">
+      % }
     <a class="ml-1 btn btn-sm btn-outline-secondary  custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
+              justify-content-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
               href="/deploy/<%= $game %>/<%= $game %>" role="button">deploy</a>
     <a class="ml-1 btn btn-sm btn-outline-info     custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
+              justify-content-end" data-toggle="tooltip" data-placement="top" title="remove connection from the network"
               href="/drop/<%= $game %>/<%= $game %>" role="button">drop</a>
     <a class="ml-1 btn btn-sm btn-success    custom
-              justify-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
+              justify-content-end" data-toggle="tooltip" data-placement="top" title="copy from storage and start"
               href="/boot/<%= $game %>/<%= $game %>" role="button">boot</a>
   </div>
   % }
@@ -3273,17 +3275,20 @@ window.addEventListener("beforeunload", function(e) {
         </div>
             % for my $game ( sort keys %{$network->{'games'}} ) {
             % next unless ( $network->{'games'}{$game}{'node'} eq $node );
-  <div class="row height: 40px">
-    <div class="col mb-2 shadow">
-
+  <div class="row height: 35px">
+%   if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+        <div class="col mb-2 shadow bg-success bg-opacity-10">
+%   } else {
+        <div class="col mb-2 shadow bg-danger bg-opacity-10">
+%}
       <span>
-        <a href="/filemanager/<%= $game %>" class="list-group-item-action list-group-item-light">
+        <a href="/filemanager/<%= $game %>" >
           <img class="zoom align-self-top mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
       </span>
       <span>
-        <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" class="list-group-item-action list-group-item-light">
+        <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" >
           <img class="zoom align-self-top mr-3" src="/images/matrix_log.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
@@ -3324,14 +3329,18 @@ window.addEventListener("beforeunload", function(e) {
 
     </div>
         % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
-          <div class="col d-flex justify-content-end mb-2 shadow">
+%   if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-success bg-opacity-10">
+%   } else {
+        <div class="col d-flex justify-content-end mb-2 shadow bg-danger bg-opacity-10">
+%}
             <a class="ml-1 btn btn-sm btn-outline-danger
                justify-end custom" href="/minion/locks"      role="button">busy</a>
           </div>
           </div>
         % next; }
         % if ( defined $network->{'games'}{$game}{'pid'} ) {
-          <div class="col d-flex justify-content-end mb-2 shadow">
+          <div class="col d-flex justify-content-end mb-2 shadow bg-success bg-opacity-10">
             <a class="ml-1 btn btn-sm btn-outline-secondary  custom
               justify-end" data-toggle="tooltip" data-placement="top" title="snapshot game to storage"
               href="/store/<%= $game %>/<%= $game %>"     role="button">store</a>
@@ -3346,7 +3355,7 @@ window.addEventListener("beforeunload", function(e) {
               href="/halt/<%= $game %>/<%= $game %>"      role="button">halt</a>
           </div>
         % } else {
-          <div class="col d-flex justify-content-end mb-2 shadow">
+          <div class="col d-flex justify-content-end mb-2 shadow bg-danger bg-opacity-10">
             <a class="ml-1 btn btn-sm btn-outline-secondary  custom
               justify-end" data-toggle="tooltip" data-placement="top" title="copy game data from storage to node"
               href="/deploy/<%= $game %>/<%= $game %>"    role="button">deploy</a>
@@ -3627,7 +3636,7 @@ $(document).ready(function() {
              alt="Generic placeholder image" height="35px">
         </image>
       </a>
-      <%= $game %> command console
+      <%= $game %> console
     </h4>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
