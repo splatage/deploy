@@ -3174,7 +3174,7 @@ $(document).ready(function() {
           </image>
         </span>
         <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-        <small>offline</small>
+        <small><b>offline</b></small>
         </span>
 
   % }
@@ -3302,19 +3302,16 @@ window.addEventListener("beforeunload", function(e) {
            </h4><b><%= $game %></b></h4>
         </image>
       </span>
+      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+        <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu</small>
+      </span>
+      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+       <small><%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB</small>
+      </span>
+      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+       <small><%= $network->{'games'}{$game}{'node'} %></small>
+      </span>
 
-      <small>
-
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-        <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu
-      </span>
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-       <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB
-      </span>
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-       <%= $network->{'games'}{$game}{'node'} %>
-      </span>
-        </small>
 %   } else {
         <span style="width: 6em;">
           <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="25">
@@ -3322,7 +3319,7 @@ window.addEventListener("beforeunload", function(e) {
           </image>
         </span>
         <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-        offline
+        <small><b>offline</b></small>
         </span>
 
 %   }
