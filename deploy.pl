@@ -695,7 +695,6 @@ get '/' => sub {
         title    => 'network overview',
         network  => $network,
         perms    => $perms,
-        expected => $game_settings,
         is_admin => $is_admin,
         username => $username,
         pool     => $pool,
@@ -713,9 +712,16 @@ get '/pool' => sub {
     my $is_admin    = $perms->{$username}{'admin'};
     my $pool        = $perms->{$username}{'pool'};
 
-    my $network     = checkIsOnline(
-        list_by     => 'node',
-        ssh_master  => $config->{'ssh_master'}
+    my $network->{'nodes'} = readFromDB(
+        table           => 'nodes',
+        column          => 'name',
+        hash_ref        => 'true'
+    );
+
+    $network->{'games'} = readFromDB(
+        table           => 'games',
+        column          => 'name',
+        hash_ref        => 'true'
     );
 
     my $jobs = app->minion->jobs(
@@ -799,14 +805,6 @@ get '/node/:node' => sub {
         hash_ref    => 'false'
     );
 
-    my $expected    = readFromDB(
-        table       => 'games',
-        column      => 'name',
-        field       => 'node',
-        value       => $node,
-        hash_ref    => 'true'
-    );
-
     my $jobs = app->minion->jobs(
         {
             queues => ['default'],
@@ -821,7 +819,6 @@ get '/node/:node' => sub {
         template    => 'node',
         network     => $network,
         history     => $jobs,
-        expected    => $expected,
         perms       => $perms,
         is_admin    => $is_admin,
         username    => $username,
@@ -1264,11 +1261,17 @@ get '/filemanager/:game'  => sub {
     my $username    = $c->yancy->auth->current_user->{'username'};
     my $is_admin    = $perms->{$username}{'admin'};
     my $pool        = $perms->{$username}{'pool'};
-    my $network     = checkIsOnline(
-        list_by     => 'node',
-        node        => $node,
-        game        => '',
-        ssh_master  => $config->{'ssh_master'}
+
+    my $network->{'nodes'} = readFromDB(
+        table           => 'nodes',
+        column          => 'name',
+        hash_ref        => 'true'
+    );
+
+    $network->{'games'} = readFromDB(
+        table           => 'games',
+        column          => 'name',
+        hash_ref        => 'true'
     );
 
     unless ( $game_settings->{$game}{'pool'} eq $perms->{$username}{'pool'} || $is_admin eq '1' ) {
