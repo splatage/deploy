@@ -1014,7 +1014,7 @@ websocket '/filemanager/<game>-ws' => sub {
                         <div>
                            <h6>folder: $path</h6>
                            <h6>size: $size</h6>
-                           <h6>created:  $created</h6>
+                          <!-- <h6>created:  $created</h6> -->
                            <h6>modified: $modified</h6>
                            <hr>
                             $preview
@@ -1037,12 +1037,11 @@ websocket '/filemanager/<game>-ws' => sub {
                     </h2>
                     <div id="collapseOne" class="accordion-collapse collapse" aria-labelledby="headingOne"
                       data-bs-parent="#accordionExample">
-                        <div class="accordion-body bg-light ">
-                            <hr>
+                        <div class="accordion-body bg-light">
                               <form id="upload_form" enctype="multipart/form-data" method="post">
                               <input name="folder" type="hidden" value="$encoded_path">
                               <input type="file" name="filelist" id="filelist" onchange="uploadFile('$encoded_path')" multiple/><br>
-                              <hr>
+                            <hr>
                               <!-- progress bars container -->
                                 <div id="dynamic_progress"></div>
                              <!-- <progress id="progressBar" value="0" max="100" style="width:50%;"></progress> -->
@@ -3783,7 +3782,7 @@ $(document).ready(function() {
 
 <script src="/ace-builds-master/src-min-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
 <script src="/ace-builds-master/src-min-noconflict/ext-modelist.js" type="text/javascript" charset="utf-8"></script>
-
+<script src="/js/diff_match_patch_uncompressed.js" type="text/javascript" charset="utf-8"></script>
 <script>
 var socket;
 var ws_host;
@@ -3819,7 +3818,7 @@ $(document).ready(function() {
                 link.click();
             };
             if ( 'editor_content' in data ) {
-                console.log(data.editor_content);
+                // console.log(data.editor_content);
                 editor.session.setValue(data.editor_content);
                 editor_content = data.editor_content;
                 // alert(data.editor_content);
@@ -3859,7 +3858,7 @@ function delete_file(msg) {
 
 function upload_file(msg) {
     var encoded = encodeURIComponent(msg);
-    console.log(encoded);
+    // console.log(encoded);
     socket.send(JSON.stringify({
         upload_file: msg
     }));
@@ -3867,11 +3866,16 @@ function upload_file(msg) {
 
 var editor;
 var current_file;
+var editor_content;
 
 function edit_file(msg) {
     if ( msg == 'save' ) {
         var content = editor.getValue();
-        if (confirm( "save? " + decodeURIComponent(current_file) +"\n" + content ) == true ) {
+        var dmp     = new diff_match_patch();
+        var diff    = dmp.patch_make(editor_content, content);
+        var patch   = dmp.patch_toText(diff);
+
+        if (confirm( "review changes for: " + decodeURIComponent(current_file) +"\n" + decodeURI(patch) ) == true ) {
             socket.send(JSON.stringify({
                 save_editor_content: content,
                 file_path: current_file
