@@ -866,7 +866,7 @@ websocket '/filemanager/<game>-ws' => sub {
            $file_cmd   .= qq/&& find * -maxdepth 0 -type f  | grep -Ev '(z|jar|mca)\$' | xargs grep -IlH . /;
            $file_cmd   .= qq(| xargs -d '\\n' head -v -n 15);
 
-        app->log->info($file_cmd);
+        app->log->trace($file_cmd);
 
         my $head        =  $ssh->{'link'}->capture("$file_cmd");
            $head        =~ s/\n/<newline>/g;
@@ -1005,7 +1005,7 @@ websocket '/filemanager/<game>-ws' => sub {
                         $content .= qq(
                         <button class="btn btn-sm btn-outline-primary m-1" type="button" data-bs-dismiss="offcanvas"
                                 style="width: 100px !important;" onclick="get_file('$encoded_file_link')">
-                          download
+                          fetch
                         </button>
 
                         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
@@ -1094,7 +1094,7 @@ websocket '/filemanager/<game>-ws' => sub {
         my $encoded = $id . '/' . $filename;
            $encoded = b64_encode $encoded;
 
-        app->log->info("$encoded");
+        app->log->trace("$encoded");
         $self->send( to_json{ path => "download", filename => $encoded }, {pretty => 1} ) ;
        # $self->send( $content ) if $content;
     };
@@ -1159,7 +1159,7 @@ if (open FILE, '<:encoding(utf8)', "tmp/$id/$filename") {
   }
   close FILE;
 }
-            app->log->info("file: $content");
+            app->log->trace("file: $content");
 
         $self->send( to_json{ editor_content => $content }, {pretty => 1} ) if $content;
 
@@ -2074,7 +2074,7 @@ sub checkIsOnline {
         $network->{'nodes'}{$this_node}{'ip'}     = $ip;
 
         #my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
-        my @cmd = q( ps --no-headers axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd );
+        my @cmd = q( ps --no-headers axo user:20,pid,ppid,pcpu,pmem,vsz,rss,etime,cmd );
         my $screen_list = $ssh->{'link'}->capture(@cmd);
 
         my @screen_list = split( '\n', $screen_list );
@@ -2087,20 +2087,21 @@ sub checkIsOnline {
 
                 if ( $column[2] eq '1' ) {
                     # SCREEN has ppid of 1. Load the PID and game
-                    $temp_hash->{ $column[1] . $this_node }{'node'} = $this_node;
-                    $temp_hash->{ $column[1] . $this_node }{'ip'}   = $ip;
-                    $temp_hash->{ $column[1] . $this_node }{'user'} = $column[0];
-                    $temp_hash->{ $column[1] . $this_node }{'game'} = $column[12];
+                    $temp_hash->{ $column[1] . $this_node }{'node'}     = $this_node;
+                    $temp_hash->{ $column[1] . $this_node }{'ip'}       = $ip;
+                    $temp_hash->{ $column[1] . $this_node }{'user'}     = $column[0];
+                    $temp_hash->{ $column[1] . $this_node }{'game'}     = $column[13];
                 }
 
                 if ( $column[2] ne '1' ) {
                     # Match java child ppid to SCREEN pid to reference correct hash
-                    $temp_hash->{ $column[2] . $this_node }{'pid'}  = $column[1];
-                    $temp_hash->{ $column[2] . $this_node }{'ppid'} = $column[2];
-                    $temp_hash->{ $column[2] . $this_node }{'pcpu'} = $column[3];
-                    $temp_hash->{ $column[2] . $this_node }{'pmem'} = $column[4];
-                    $temp_hash->{ $column[2] . $this_node }{'vsz'}  = $column[5];
-                    $temp_hash->{ $column[2] . $this_node }{'rss'}  = $column[6];
+                    $temp_hash->{ $column[2] . $this_node }{'pid'}      = $column[1];
+                    $temp_hash->{ $column[2] . $this_node }{'ppid'}     = $column[2];
+                    $temp_hash->{ $column[2] . $this_node }{'pcpu'}     = $column[3];
+                    $temp_hash->{ $column[2] . $this_node }{'pmem'}     = $column[4];
+                    $temp_hash->{ $column[2] . $this_node }{'vsz'}      = $column[5];
+                    $temp_hash->{ $column[2] . $this_node }{'rss'}      = $column[6];
+                    $temp_hash->{ $column[2] . $this_node }{'uptime'}   = $column[7];
                 }
             }
             $network->{'nodes'}{$this_node}{'rss'}     += $column[6];
@@ -2119,16 +2120,17 @@ sub checkIsOnline {
         app->log->warn("[!!] $game is running multiple times!")
           if ( $network->{'games'}{$game}{'pid'} );
 
-        $network->{'games'}{$game}{'node'} = $temp_hash->{$result}{'node'};
-        $network->{'games'}{$game}{'user'} = $temp_hash->{$result}{'user'};
-        $network->{'games'}{$game}{'game'} = $temp_hash->{$result}{'game'};
-        $network->{'games'}{$game}{'pid'}  = $temp_hash->{$result}{'pid'};
-        $network->{'games'}{$game}{'ppid'} = $temp_hash->{$result}{'ppid'};
-        $network->{'games'}{$game}{'pcpu'} = $temp_hash->{$result}{'pcpu'};
-        $network->{'games'}{$game}{'pmem'} = $temp_hash->{$result}{'pmem'};
-        $network->{'games'}{$game}{'vsz'}  = $temp_hash->{$result}{'vsz'};
-        $network->{'games'}{$game}{'rss'}  = $temp_hash->{$result}{'rss'};
-        $network->{'games'}{$game}{'ip'}   = $temp_hash->{$result}{'ip'};
+        $network->{'games'}{$game}{'node'}      = $temp_hash->{$result}{'node'};
+        $network->{'games'}{$game}{'user'}      = $temp_hash->{$result}{'user'};
+        $network->{'games'}{$game}{'game'}      = $temp_hash->{$result}{'game'};
+        $network->{'games'}{$game}{'pid'}       = $temp_hash->{$result}{'pid'};
+        $network->{'games'}{$game}{'ppid'}      = $temp_hash->{$result}{'ppid'};
+        $network->{'games'}{$game}{'pcpu'}      = $temp_hash->{$result}{'pcpu'};
+        $network->{'games'}{$game}{'pmem'}      = $temp_hash->{$result}{'pmem'};
+        $network->{'games'}{$game}{'vsz'}       = $temp_hash->{$result}{'vsz'};
+        $network->{'games'}{$game}{'rss'}       = $temp_hash->{$result}{'rss'};
+        $network->{'games'}{$game}{'ip'}        = $temp_hash->{$result}{'ip'};
+        $network->{'games'}{$game}{'uptime'}    = $temp_hash->{$result}{'uptime'};
     }
 
     if ( $args{'game'} ) {
@@ -3133,52 +3135,39 @@ $(document).ready(function() {
   %= next unless ( $network->{'games'}{$game}{'pool'} eq $pool );
   <div class="row height: 35px">
   % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-    <div class="col mb-2 shadow bg-success bg-opacity-10">
+    <div class="col mb-2 shadow bg-success bg-opacity-10 d-flex">
   % } else {
-      <div class="col mb-2 shadow bg-danger bg-opacity-10">
+    <div class="col mb-2 shadow bg-danger bg-opacity-10 d-flex">
   % }
-      <span>
+      <div class="justify-content-start flex-grow-1">
         <a href="/filemanager/<%= $game %>" >
-          <img class="zoom align-self-top mr-3 " src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
+          <img class="zoom align-self-top mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
-      </span>
-      <span>
         <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
           <img class="zoom align-self-top mr-3" src="/images/matrix_log.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
-      </span>
-
   % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-      <span>
-        <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="25">
+        <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="30s">
            </h4><b><%= $game %></b></h4>
         </image>
-      </span>
-
-      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
-        <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu</small>
-      </span>
-      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
-       <small><%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB</small>
-      </span>
-      <span style="float:right; mr-1; text-align: right;" class="mr-1 fs-6 no-wrap custom">
-       <small><%= $network->{'games'}{$game}{'node'} %></small>
-      </span>
-
+      </div>
+      <div class="fs-6 justify-content-end">
+        <small> cpu <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % <i>|</i></small>
+        <small><%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB <i>|</i></small>
+        <!--  <small><%= $network->{'games'}{$game}{'node'} %></small> -->
+        <small>uptime <%= $network->{'games'}{$game}{'uptime'} %></small>
+      </div>
   % } else {
-        <span style="width: 6em;">
-          <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="25">
+        <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="30">
           </h4><b><%= $game %></b></h4>
-          </image>
-        </span>
-        <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+        </image>
+      </div>
+      <div class="fs-6 justify-content-end">
         <small><b>offline</b></small>
-        </span>
-
+      </div>
   % }
-
     </div>
     % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
       % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
@@ -3276,53 +3265,40 @@ window.addEventListener("beforeunload", function(e) {
             % for my $game ( sort keys %{$network->{'games'}} ) {
             % next unless ( $network->{'games'}{$game}{'node'} eq $node );
   <div class="row height: 35px">
-%   if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-        <div class="col mb-2 shadow bg-success bg-opacity-10">
-%   } else {
-        <div class="col mb-2 shadow bg-danger bg-opacity-10">
-%}
-      <span>
+  % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+    <div class="col mb-2 shadow bg-success bg-opacity-10 d-flex">
+  % } else {
+    <div class="col mb-2 shadow bg-danger bg-opacity-10 d-flex">
+  % }
+      <div class="justify-content-start flex-grow-1">
         <a href="/filemanager/<%= $game %>" >
           <img class="zoom align-self-top mr-3" src="/images/mc_folders.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
-      </span>
-      <span>
-        <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>" >
+        <a href="/log/<%= $network->{'games'}{$game}{node} %>/<%= $game %>">
           <img class="zoom align-self-top mr-3" src="/images/matrix_log.png" alt="Generic placeholder image" height="35">
           </image>
         </a>
-      </span>
-
-
-
-%   if ( defined $network->{'games'}{$game}{'pcpu'} ) {
-      <span>
-        <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="25">
+  % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
+        <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="30s">
            </h4><b><%= $game %></b></h4>
         </image>
-      </span>
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-        <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % cpu</small>
-      </span>
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-       <small><%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB</small>
-      </span>
-      <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
-       <small><%= $network->{'games'}{$game}{'node'} %></small>
-      </span>
-
-%   } else {
-        <span style="width: 6em;">
-          <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="25">
+      </div>
+      <div class="fs-6 justify-content-end">
+        <small> cpu <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % <i>|</i></small>
+        <small><%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB <i>|</i></small>
+        <!--  <small><%= $network->{'games'}{$game}{'node'} %></small> -->
+        <small>uptime <%= $network->{'games'}{$game}{'uptime'} %></small>
+      </div>
+  % } else {
+        <img class="zoom align-self-top mr-3" src="/images/redX.png" alt="X" image" height="30">
           </h4><b><%= $game %></b></h4>
-          </image>
-        </span>
-        <span style="float:right; mr-1; width: 6em; text-align: right;" class="mr-1 fs-6">
+        </image>
+      </div>
+      <div class="fs-6 justify-content-end">
         <small><b>offline</b></small>
-        </span>
-
-%   }
+      </div>
+  % }
 
     </div>
         % if ( ! app->minion->lock($game, 0) or defined $locks->{$game} ) {
@@ -3743,15 +3719,17 @@ $(document).ready(function() {
 
 <head>
 <style type="text/css" media="screen">
-    #editor {
-        position: relative;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 70vh;
-        line-height: 125%;
+#editor {
+    position: relative;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 75vh;
+    line-height: 125%;
+}
+
 </style>
 
 </head>
@@ -3785,24 +3763,25 @@ $(document).ready(function() {
                      aria-labelledby="editor_label" aria-hidden="true" >
                  <div class="modal-dialog modal-xl" style="min-width: 80%;">
                     <div class="modal-content">
-                      <div class="modal-header">
-                        <h1 class="modal-title fs-5" id="editor_label">file editor</h1>
+                      <div class="modal-header d-flex">
+                        <div>
+                          <h1 class="modal-title fs-5" id="editor_label">file editor</h1>
+                        </div>
+                        <div class="d-flex-justify-content-end">
+                          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">close</button>
+                          <button type="button" class="btn btn-primary" onclick="edit_file('save')">save</button>
+                       </div>
                       </div>
 
                       <div class="modal-body">
                         <!-- editor embedded here -->
                         <div id="editor" class="bg-success text-dark bg-opacity-10 rounded border border-success shadow"
-                        style="--bs-border-opacity: .5;"></div>
-                        <!-- -->
+                        style="--bs-border-opacity: .5;">
+                        </div>
                       </div>
-
-                  <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">close</button>
-            <button type="button" class="btn btn-primary" onclick="edit_file('save')">save</button>
-          </div>
-        </div>
-      </div>
-    </div>
+                    </div>
+                  </div>
+                </div>
 </body>
 
 
@@ -3896,11 +3875,12 @@ var current_file;
 function edit_file(msg) {
     if ( msg == 'save' ) {
         var content = editor.getValue();
-        alert( "saved: " + decodeURIComponent(current_file) +"\n" + content );
-        socket.send(JSON.stringify({
-            save_editor_content: content,
-            file_path: current_file
-        }));
+        if (confirm( "save? " + decodeURIComponent(current_file) +"\n" + content ) == true ) {
+            socket.send(JSON.stringify({
+                save_editor_content: content,
+                file_path: current_file
+            }));
+        }
     } else {
         current_file = msg;
         var decode_path = decodeURIComponent(msg);
@@ -3912,7 +3892,7 @@ function edit_file(msg) {
         console.log("setting syntax mode: " + mode);
         editor.session.setMode(mode);
 
-        editor.setTheme("ace/theme/dawn");
+        editor.setTheme("ace/theme/iplastic");
         editor.session.setTabSize(4);
         editor.session.setUseSoftTabs(true);
         editor.setShowPrintMargin(false);
