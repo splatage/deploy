@@ -3259,7 +3259,6 @@ window.addEventListener("beforeunload", function(e) {
               </a>
             </div>
         <div class="row height: 40px">
-        <hr>
         <h5 class="text-success">games</h5>
         </div>
             % for my $game ( sort keys %{$network->{'games'}} ) {
@@ -3408,7 +3407,7 @@ window.addEventListener("beforeunload", function(e) {
                </span>
 
                <span style="float:right;" class="text-dark fs-7 no-wrap align-self-top">
-                 <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % |
+                 <small><%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % <i>|</i>
                    <%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %>M
                  </small>
                </span>
@@ -3447,7 +3446,6 @@ window.addEventListener("beforeunload", function(e) {
     % }
   </div>
   </div>
-      <hr>
       <div class="alert alert-danger alert-dismissible fade show" role="alert">
         <h4 class="alert-heading">offline nodes</h4>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
@@ -3478,7 +3476,6 @@ window.addEventListener("beforeunload", function(e) {
           </div>
           % }
         % }
-<hr>
 </div>
 
 
@@ -3503,7 +3500,6 @@ window.addEventListener("beforeunload", function(e) {
       <h2 class="accordion-header" id="flush-heading<%= $numbers{$count} %>">
         <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#flush-collapse<%= $numbers{$count} %>" aria-expanded="false" aria-controls="flush-collapse<%= $numbers{$count} %>">
           <strong><%= $title %> </strong>
-          <hr>
         </button>
       </h2>
       <div id="flush-collapse<%= $numbers{$count} %>" class="accordion-collapse collapse <%= $show %>" aria-labelledby="flush-heading<%= $numbers{$count} %>" data-bs-parent="#accordionFlushExample">

@@ -1,6 +1,6 @@
 #!/bin/bash
 MINION_WORKERS=1
-MINION_JOBS=8
+MINION_JOBS=4
 MOJO_APP=deploy.pl
 
 function start_mojo () {
@@ -19,13 +19,13 @@ function start_minions () {
     screen -list
 }
 
-function test () {
+function morbo () {
     screen -h 1024 -L -dmS mojo_test1 morbo ${MOJO_APP} -l http://*:3001
     sleep 1
     screen -list
 }
 
-function stop_minions () {
+function stop_screens () {
     screen -list | awk -F '.' '/mojo/ || /minion/ {print $1}' | xargs kill
     sleep 2
     screen -list
@@ -48,7 +48,7 @@ function hot_restart_mojo () {
 case $1 in
     restart)
         hot_restart_mojo
-        stop_minions
+        stop_screens
         start_minions
     ;;
     start)
@@ -57,10 +57,10 @@ case $1 in
     ;;
     stop)
         stop_mojo
-        stop_minions
-        cleanup_ssh_master_sockets 
+        stop_screens
+        cleanup_ssh_master_sockets
    ;;
-    test)
-        test
+    morbo)
+        morbo
     ;;
 esac
