@@ -3724,6 +3724,9 @@ $(document).ready(function() {
     height: 75vh;
     line-height: 125%;
 }
+.ace-changed {
+    background: #FCAF3E;
+}
 
 </style>
 
@@ -3817,11 +3820,37 @@ $(document).ready(function() {
                 console.log(link.href);
                 link.click();
             };
+
             if ( 'editor_content' in data ) {
-                // console.log(data.editor_content);
                 editor.session.setValue(data.editor_content);
+              //  editor.session.clearAnnotations();
                 editor_content = data.editor_content;
-                // alert(data.editor_content);
+
+                var modified = 'ace-changed'; // css class
+
+                var clearLine = 0;
+                while (clearLine < ( editor.session.getLength() + 1)) {
+                    editor.session.removeGutterDecoration(clearLine, modified);
+                    clearLine++;
+                }
+
+                editor.on('change', function(e) {
+                if (editor.curOp && editor.curOp.command.name ) {
+                    var activeLine = e.start.row;
+                    if (e.action == "insert") {
+                        while (activeLine < (e.end.row + 1)) {
+                            editor.session.removeGutterDecoration(activeLine, modified);
+                            editor.session.addGutterDecoration(activeLine, modified);
+                            activeLine++;
+                        }
+                    } else if (e.action == "remove") {
+                        while (activeLine < (e.end.row + 1)) {
+                            editor.session.removeGutterDecoration(activeLine, modified);
+                            activeLine++;
+                        }
+                        editor.session.addGutterDecoration(e.start.row, modified);
+                    }
+                }});
             };
         };
     };
@@ -3872,23 +3901,25 @@ function edit_file(msg) {
     if ( msg == 'save' ) {
         var content = editor.getValue();
         var dmp     = new diff_match_patch();
-        var diff    = dmp.patch_make(editor_content, content);
-        var patch   = dmp.patch_toText(diff);
+        // var diff    = dmp.patch_make(editor_content, content);
+        var diff    = dmp.diff_main(editor_content, content);
+                      dmp.diff_cleanupSemantic(diff);
+            diff    = dmp.patch_make(diff);
+    //    var patch   = dmp.patch_toText(diff);
 
-        if (confirm( "review changes for: " + decodeURIComponent(current_file) +"\n" + decodeURI(patch) ) == true ) {
+        if (confirm( "confirm changes:\n" + decodeURIComponent(diff) ) == true ) {
             socket.send(JSON.stringify({
                 save_editor_content: content,
                 file_path: current_file
             }));
         }
     } else {
-        current_file = msg;
+        current_file    = msg;
         var decode_path = decodeURIComponent(msg);
-        editor = ace.edit("editor");
-
-        var modelist = ace.require("ace/ext/modelist");
-        var mode = modelist.getModeForPath(decode_path).mode;
-
+            editor      = ace.edit("editor");
+        var modelist    = ace.require("ace/ext/modelist");
+        var mode        = modelist.getModeForPath(decode_path).mode;
+editor.session.setValue();
         console.log("setting syntax mode: " + mode);
         editor.session.setMode(mode);
 
@@ -3924,10 +3955,10 @@ function uploadFile(folder) {
         var ajax = new XMLHttpRequest();
 
         ajax.upload.addEventListener("loadstart", function(e) {
-            var uniqID = Math.floor((Math.random() * 100000));
+            var uniqID      = Math.floor((Math.random() * 100000));
             this.progressID = "progress_" + uniqID;
             this.filesizeID = "filesize_" + uniqID;
-            this.filename = thisfile.name;
+            this.filename   = thisfile.name;
             console.log("inserting progress html for " + this.filename + ": " + this.progressID + " " + this.filesizeID);
             $("#dynamic_progress").prepend('<div><progress id="' + this.progressID + '" value="0" max="100" style="width: 50%;"></progress></div>');
        //     $("#dynamic_progress").prepend('<div><b>' + this.filename + '</b></div><div id="' + this.filesizeID + '"><br></div>');
