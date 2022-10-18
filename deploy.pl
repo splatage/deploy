@@ -2073,13 +2073,19 @@ sub checkIsOnline {
         $network->{'nodes'}{$this_node}{'ip'}     = $ip;
 
         #my @cmd = "ps axo user:20,pid,ppid,pcpu,pmem,vsz,rss,cmd | grep -i ' [s]creen.*server\\|[j]ava.*server'";
-        my @cmd = q( ps --no-headers axo user:20,pid,ppid,pcpu,pmem,vsz,rss,etime,cmd );
+        my @cmd = q( ps --no-headers axo user:20,pid,ppid,pcpu,pmem,vsz,rss,etime,cmd; ss -Honut );
         my $screen_list = $ssh->{'link'}->capture(@cmd);
 
         my @screen_list = split( '\n', $screen_list );
 
         # Extract and colate key information - index on node and pip
         foreach my $this_game (@screen_list) {
+            if ( $this_game     =~ /ESTAB/ ) {
+                my @portnum     = split( /[ \t:]+/, $this_game );
+                   $temp_hash->{'players'}{$portnum[5]}++;
+                next;
+            }
+            else {
             my @column = split( / +/, $this_game );
 
                 if ( $this_game =~ /SCREEN.*server/ or $this_game =~ /java.*server/ ) {
@@ -2105,7 +2111,7 @@ sub checkIsOnline {
             }
             $network->{'nodes'}{$this_node}{'rss'}     += $column[6];
             $network->{'nodes'}{$this_node}{'pcpu'}    += $column[3];
-
+            }
         }
     }
 
@@ -2130,6 +2136,7 @@ sub checkIsOnline {
         $network->{'games'}{$game}{'rss'}       = $temp_hash->{$result}{'rss'};
         $network->{'games'}{$game}{'ip'}        = $temp_hash->{$result}{'ip'};
         $network->{'games'}{$game}{'uptime'}    = $temp_hash->{$result}{'uptime'};
+        $network->{'games'}{$game}{'players'}   = $temp_hash->{'players'}{ $network->{'games'}{$game}{'port'} };
     }
 
     if ( $args{'game'} ) {
@@ -3150,6 +3157,9 @@ $(document).ready(function() {
   % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
         <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="30s">
            </h4><b><%= $game %></b></h4>
+            % if ( defined $network->{'games'}{$game}{'players'} ) {
+            <span class="badge rounded-pill text-bg-primary bg-primary"> <%= $network->{'games'}{$game}{'players'} %> </span>
+            % }
         </image>
       </div>
       <div class="fs-6 justify-content-end">
@@ -3279,10 +3289,15 @@ window.addEventListener("beforeunload", function(e) {
         </a>
   % if ( defined $network->{'games'}{$game}{'pcpu'} ) {
         <img class="zoom align-self-top mr-3" src="/images/creeper-server-icon.png" alt="Generic placeholder image" height="30s">
-           </h4><b><%= $game %></b></h4>
+           </h4><b><%= $game %></b>
+           % if ( defined $network->{'games'}{$game}{'players'} ) {
+            <span class="badge rounded-pill text-bg-primary bg-primary"> <%= $network->{'games'}{$game}{'players'} %> </span>
+            % }
+        </h4>
         </image>
       </div>
       <div class="fs-6 justify-content-end">
+
         <small> cpu <%= int($network->{'games'}{$game}{'pcpu'} + 0.5) %> % <i>|</i></small>
         <small><%= int($network->{'games'}{$game}{'rss'}/1024 + 0.5) %> MB <i>|</i></small>
         <!--  <small><%= $network->{'games'}{$game}{'node'} %></small> -->
@@ -3403,6 +3418,9 @@ window.addEventListener("beforeunload", function(e) {
 
                <span style="float" class="text-dark fs-6 no-wrap">
                  <b><small><%= $game %></small></b>
+                % if ( defined $network->{'games'}{$game}{'players'} ) {
+                <span class="badge rounded-pill text-bg-primary bg-primary"> <%= $network->{'games'}{$game}{'players'} %> </span>
+                % }
                </span>
 
                <span style="float:right;" class="text-dark fs-7 no-wrap align-self-top">
@@ -3823,12 +3841,11 @@ $(document).ready(function() {
 
             if ( 'editor_content' in data ) {
                 editor.session.setValue(data.editor_content);
-              //  editor.session.clearAnnotations();
-                editor_content = data.editor_content;
 
-                var modified = 'ace-changed'; // css class
+                editor_content  = data.editor_content;
+                var modified    = 'ace-changed'; // css class
+                var clearLine   = 0;
 
-                var clearLine = 0;
                 while (clearLine < ( editor.session.getLength() + 1)) {
                     editor.session.removeGutterDecoration(clearLine, modified);
                     clearLine++;
@@ -3919,7 +3936,7 @@ function edit_file(msg) {
             editor      = ace.edit("editor");
         var modelist    = ace.require("ace/ext/modelist");
         var mode        = modelist.getModeForPath(decode_path).mode;
-editor.session.setValue();
+
         console.log("setting syntax mode: " + mode);
         editor.session.setMode(mode);
 
@@ -3929,7 +3946,7 @@ editor.session.setValue();
         editor.setShowPrintMargin(false);
         document.getElementById('editor').style.fontSize='0.875em';
         _('editor_label').innerHTML = "file editor: " + decodeURIComponent(msg);
-
+        editor.session.setValue('loading...');
         socket.send(JSON.stringify({
             load_editor_content: true,
             file_path: msg
