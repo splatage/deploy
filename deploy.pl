@@ -862,28 +862,6 @@ websocket '/filemanager/<game>-ws' => sub {
 
         my $files       = $ssh->{'link'}->capture("$ls_cmd") ; #if $hash->{path};
 
-        my $file_cmd    = qq([ -d '$home_dir/$path' ] && cd '$home_dir/$path' );
-           $file_cmd   .= qq/&& find * -maxdepth 0 -type f  | grep -Ev '(z|jar|mca)\$' | xargs grep -IlH . /;
-           $file_cmd   .= qq(| xargs -d '\\n' head -v -n 15);
-
-        app->log->trace($file_cmd);
-
-        my $head        =  $ssh->{'link'}->capture("$file_cmd");
-           $head        =~ s/\n/<newline>/g;
-
-           app->log->trace("$game heads: $head");
-
-        my $num;
-        foreach ( split '==> ', $head ) {
-        ++$num;
-         my ($filename, $line_content) =  (split ' <==', $_ );
-            next unless $filename;
-            $file_content{$filename}   =  $line_content;
-            $file_content{$filename}   =~ s/<newline>/\n/g;
-            $file_content{$filename}   =~ s/>/\&gt;/g;
-            $file_content{$filename}   =~ s/</\&lt;/g;
-        }
-
         $content  = q(<nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb"><ol class="breadcrumb">);
 
         my @breadcrumbs = ( split '/', $path );
@@ -902,7 +880,17 @@ websocket '/filemanager/<game>-ws' => sub {
         }
 
         $content .= q(</ol> </nav><hr>);
-        $content .= q(<div class="container"><div class="row">);
+        $content .= q(<div class="container">);
+        $content .= q(<table class="table table-sm table-hover" >
+                <thead>
+                    <tr>
+                    <th scope="col">name</th>
+                    <th scope="col">size</th>
+                    <th scope="col">modified</th>
+                    <th scope="col">action</th>
+                    </tr>
+                </thead>
+                <tbody>);
 
         foreach my $line ( split '\n',  $files ) {
             my $color   = 'light';
@@ -930,103 +918,63 @@ websocket '/filemanager/<game>-ws' => sub {
             if ( $filename =~ m/rc$/ )   { $icon = q(bi-gear);           }
             if ( $filename =~ m/gz$/ )  { $icon = q(bi-file-earmark-zip);   }
 
-            if ( $filename =~ m/json$/ && $file_content{$filename} ne '' ) {
-             $file_content{$filename} =~ s/":"/" => "/g;
-             $file_content{$filename} =~ s/,([^{])/,\n    $1/g;
-             $file_content{$filename} =~ s/,\{/,\n\{/g;
-             $file_content{$filename} =~ s/\{/\{\n    /g;
-             $file_content{$filename} =~ s/}/\n}/g;
-             $file_content{$filename} =~ s/\n[ \t]*\n/\n/g;
-            }
-
-            my $id = '';
-            for my $i (0..10) {
-                $id .= chr(rand(25) + 97);
-            }
-
-            app->log->trace("id: $filename -> $id");
-
-            my $preview = 'binary file or preview unavailable';
-            if ( defined $file_content{$filename} ) {
-                $preview = qq(
-                    <h6>file preview:</h6>
-                    <div class="bg-success p-1 text-dark bg-opacity-10 rounded border border-success shadow"
-                        style="--bs-border-opacity: .10;">
-                        <code><pre>$file_content{$filename}</pre></code>
-                    </div>
-                );
-            }
-
             if ( $type =~ m/^directory/ ) {
                 $icon = q(bi-folder-fill); $color = 'green';
                 $content .= qq(
-                <span class="col-md-4 no_wrap">
-                    <button class="btn" data-bs-target="#$id style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;"
-                     type="submit" id="$id" value="$path/$filename" onclick="browser_path('$path/$filename')">
-                    <i class="bi $icon" style="font-size: 1.75rem; color: $color;"></i>
-                    $filename
+                <tr>
+                    <th scope="row">
+                    <button type="button"  onclick="browser_path('$path/$filename')"
+                         class="btn-sm mt-0 me-0 bg-transparent" style="border: 0;" fill="currentColor">
+                        <i class="bi $icon"
+                        style="font-size: 1.75rem; color: $color"></i>
+                        $filename
                     </button>
-                </span>
+                    </th>
+                    <td><i>dir</i></td>
+                    <td><i>$modified</i></td>
+                    <td>-</td>
+                </tr>
                );
             }
             else {
             my $modal = 'editor_m';
             my $label = 'editor_label';
             $content .= qq(
-                <span class="col-md-4 no_wrap">
-                    <button class="btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#$id"
-                        aria-controls="$id" style="text-align: start; text-indent: -1.1em; padding-left: 2.85em;">
-                    <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;"></i>
-                    $filename
-                    </button>
-                  <div class="offcanvas offcanvas-start" style="width: 750px;" tabindex="-1" id="$id"
-                        aria-labelledby="$id">
-                    <div class="offcanvas-header d-flex justify-content-between">
-                        <h5 class="offcanvas-title align-bottom flex-grow-1" id="$id">
-                        <i class="bi $icon" style="font-size: 2.5rem; color: green;"></i> $filename </h5>
+    <tr>
+      <th scope="row">
+        <button type="button" class="btn-sm mt-0 me-0 bg-transparent" style="border: 0;" fill="currentColor">
+        <i class="bi $icon zoom" style="font-size: 1.75rem; color: $color;">
+        </i>
+            $filename
+        </button>
+      </th>
+      <td><i>$size</i></td>
+      <td><i>$modified</i></td>
+      <td>
+          <button type="button" class="btn-sm mt-0 me-0 bg-transparent" style="border: 0;">
+            <i class="bi bi-trash" style="font-size: 1.5rem; color: $color;" onclick="delete_file('$encoded_file_link')">
+            </i>
+          </button>
+          <button type="button" class="btn-sm mt-0 me-0 bg-transparent" style="border: 0;">
+             <i class="bi bi-pencil-square" style="font-size: 1.5rem; color: $color;" data-bs-toggle="modal"
+                data-bs-target="#editor_m" style="width: 100px !important;"onclick="edit_file('$encoded_file_link')">
+             </i>
+          </button>
+          <button type="button" class="btn-sm mt-0 me-0 bg-transparent" style="border: 0;">
+            <i class="bi bi-download" style="font-size: 1.5rem; color: $color;" onclick="get_file('$encoded_file_link')">
+            </i>
+          </button>
+       </td>
+    </tr>
+ );
 
-                        <button class="btn btn-sm btn-outline-danger m-1" type="button" data-bs-dismiss="offcanvas"
-                                style="width: 100px !important;" onclick="delete_file('$encoded_file_link')">
-                            delete
-                        </button>
-                        );
-
-                         if ( defined $file_content{$filename} ) {
-                        $content .= qq(
-                        <!-- Button trigger modal -->
-                        <button class="btn btn-sm btn-outline-secondary m-1" data-bs-toggle="modal"
-                                data-bs-dismiss="offcanvas" data-bs-target="#editor_m" style="width: 100px !important;"
-                                onclick="edit_file('$encoded_file_link')" >
-                          edit
-                        </button>
-                        );
-                        }
-
-                        $content .= qq(
-                        <button class="btn btn-sm btn-outline-primary m-1" type="button" data-bs-dismiss="offcanvas"
-                                style="width: 100px !important;" onclick="get_file('$encoded_file_link')">
-                          fetch
-                        </button>
-
-                        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-                    </div>
-                    <div class="offcanvas-body">
-                        <div>
-                           <h6>folder: $path</h6>
-                           <h6>size: $size</h6>
-                          <!-- <h6>created:  $created</h6> -->
-                           <h6>modified: $modified</h6>
-                           <hr>
-                            $preview
-                        </div>
-                    </div>
-                  </div>
-                 </span>
-                    );
               }
         }
         $content .= qq(
-            </div></div>
+
+            </tbody>
+            </table>
+                        </div></div>
             <div class="mt-3 shadow accordion" id="accordionExample">
                 <div class="accordion-item">
                     <h2 class="accordion-header" id="headingOne">
