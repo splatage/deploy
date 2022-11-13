@@ -858,7 +858,7 @@ websocket '/filemanager/<game>-ws' => sub {
         app->log->debug("$game path: $path");
 
         my $ls_cmd      = qq([ -d '$home_dir/$path' ] || mkdir -p '$home_dir/$path'; cd '$home_dir/$path' && );
-           $ls_cmd     .=  q(stat * .* --format '%F,%n,%Y,%s,%W' | sort -k1 -k2 -k3);
+           $ls_cmd     .=  q(stat --format '%F,%n,%Y,%s,%W' -- * .* | sort -k1 -k2 -k3);
 
         my $files       = $ssh->{'link'}->capture("$ls_cmd") ; #if $hash->{path};
 
@@ -881,7 +881,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
         $content .= q(</ol> </nav><hr>);
         $content .= q(<div class="container">);
-        $content .= q(<table class="table table-sm table-hover" >
+        $content .= q(<div class="table-responsive"> <table class="table">
                 <thead>
                     <tr>
                     <th scope="col">name</th>
@@ -974,7 +974,7 @@ websocket '/filemanager/<game>-ws' => sub {
 
             </tbody>
             </table>
-                        </div></div>
+                        </div></div></div>
             <div class="mt-3 shadow accordion" id="accordionExample">
                 <div class="accordion-item">
                     <h2 class="accordion-header" id="headingOne">
@@ -1224,8 +1224,8 @@ get '/download/:id' => sub {
     my $id          = $self->stash('id');
 
 
-   return unless ( $username );
-   $id = b64_decode $id;
+    return unless ( $username );
+    $id = b64_decode $id;
 
     # Sanitise path to prevent /../ or /./ dots travelling outside tmp dir
     $id =~ s|/\.+/|/|g;
@@ -1317,8 +1317,8 @@ websocket '/logfile-ws' => sub {
     app->log->debug("reading logfile via websocket");
 
     my $send_data;
-    $send_data = sub {
-        $results = updatePage(
+       $send_data = sub {
+        $results  = updatePage(
                     file        => $file,
                     line_index  => $results->{'line_index'},
                     ip          => $ip,
@@ -1431,21 +1431,21 @@ websocket '/log/:node/<game>-ws' => sub {
             next if ( $line eq '' );
             # Syntax highlighting
             # Time and log level
-            $line =~ s/(\[[^]]+INFO\]:*)/<span style="color: #4169E1; font-style: italic;"> $1 <\/span>/;
-            $line =~ s/(\[[^]]+WARN\]:*)/<span style="color: #FFA500; font-style: italic;"> $1 <\/span>/;
-            $line =~ s/(\[[^]]+ERROR\]:*)/<span style="background: #8B0000; color: #FFFFFF; font-style: italic;"> $1 <\/span>/;
+            $line =~ s/(\[[^]]+INFO\]:*)/<span style="color: #4169E1; font-style: italic;">$1<\/span>/;
+            $line =~ s/(\[[^]]+WARN\]:*)/<span style="color: #FFA500; font-style: italic;">$1<\/span>/;
+            $line =~ s/(\[[^]]+ERROR\]:*)/<span style="background: #8B0000; color: #FFFFFF; font-style: italic;">$1<\/span>/;
             # Plugin Name
-            $line =~ s/>( \[\S+\])/><span style="color: #41FF00;"> $1 <\/span> /;
+            $line =~ s/span>([ :]+\[[^]]*\])/span><span style="color: #41FF00;">$1<\/span>/;
             # error dump lines
-            $line =~ s/^([ \t]+at\s.+)/<span style="color: #2F4F4F; font-style: italic;"> $1 <\/span>/;
+            $line =~ s/^([ \t]+at\s.+)/<span style="color: #2F4F4F; font-style: italic;">$1<\/span>/;
             # Player Logins
-            $line =~ s/(\w*\[[^]]*\/\d+\.\d+\.\d+\.\d+\:\d+[^]]*\])/<span style="color: #FFFAFA;"> $1 <\/span>/;
+            $line =~ s/(\w*\[[^]]*\/\d+\.\d+\.\d+\.\d+\:\d+[^]]*\])/<span style="color: #f4d03f;">$1<\/span>/;
             #player commands
-            $line =~ s/([^><]+ command:)([^><]+)$/<span style="color: #FFFFFF;"> $1<\/span><span style="background:#556B2F; color: #00FFFF;"> $2&nbsp;<\/span>/;
+            $line =~ s/([^><]+ command:)([^><]+)$/<span style="color: #FFFFFF;">$1<\/span><span style="background:#556B2F; color: #00FFFF;">$2&nbsp;<\/span>/;
            # commands issued at start of line
-            $line =~ s/^(>[^><]+)$/<span style="color: #FFFFFF;"> $1 <\/span>/;
+            $line =~ s/^(>[^><]+)$/<span style="color: #FFFFFF;">$1<\/span>/;
             # End of line text
-            $line =~ s/([^><]+)$/<span style="color: #8FBC8F;"> $1 <\/span>/;
+            #$line =~ s/(^.*span>)(.*)$/$1<span style="color: #8FBC8F; background:#FFFFFF;">kk $2 kk<\/span>/;
 
 
             # $line =~ s/\s(\[.+/INFO\]: )((\[CHAT\] (.+:))|(\[.+\])?)/GG $1 $2 $3 /;
@@ -2877,7 +2877,7 @@ small b {
 
 #command-content{
     text-indent: -0.5em;
-    padding-left: 1em; font-size: small; color: #41FF00;
+    padding-left: 1em; font-size: small; color: #abb2b9;
     height: 70vh;
     overflow: auto;
     display: flex;
