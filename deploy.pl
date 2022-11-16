@@ -1062,7 +1062,7 @@ websocket '/filemanager/<game>-ws' => sub {
         my $filepath = $file;
            $filepath =~ s/[^\/]+$//;
 
-        my $cmd = qq(cd "$home_dir$filepath"; rm "$filename");
+        my $cmd = qq(cd "$home_dir$filepath"; rm -- "$filename");
            $ssh->{'link'}->system($cmd);
 
             $browser->();
