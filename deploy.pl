@@ -1034,7 +1034,7 @@ websocket '/filemanager/<game>-ws' => sub {
         # $Net::OpenSSH::debug = ~0;
         my $path = path("tmp/$id")->make_path;
 
-        my $cmd = qq(cd '$home_dir$filepath'; tar cf - '$filename');
+        my $cmd = qq(cd '$home_dir$filepath'; tar cf - './$filename');
         my $remote = $ssh->{'link'}->make_remote_command($cmd);
         system "$remote | tar xvf - -C tmp/$id  ";
 
@@ -1090,7 +1090,7 @@ websocket '/filemanager/<game>-ws' => sub {
         }
 
         my $path    = path("tmp/$id")->make_path;
-        my $cmd     = qq(cd '$home_dir$filepath'; tar --no-wildcards -cf - '$filename');
+        my $cmd     = qq(cd '$home_dir$filepath'; tar --no-wildcards -cf - './$filename');
         my $remote  = $ssh->{'link'}->make_remote_command($cmd);
         system "$remote | tar xvf - -C tmp/$id  ";
 
@@ -1146,11 +1146,11 @@ if (open FILE, '<:encoding(utf8)', "tmp/$id/$filename") {
 
         my $cmd = qq( tar xvf - -C '$store_path' );
         my $remote_cmd   = $ssh->{'link'}->make_remote_command($cmd);
-        my $combined_cmd = qq(cd '$path'; tar cf - '$filename' | $remote_cmd );
+        my $combined_cmd = qq(cd '$path'; tar cf - './$filename' | $remote_cmd );
 
         system "$combined_cmd";
 
-        app->log->trace("cd $path; tar cf - $filename | $remote_cmd");
+        app->log->trace("cd $path; tar cf - ./$filename | $remote_cmd");
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
 
@@ -1590,10 +1590,10 @@ post '/upload' => sub {
 
     my $cmd = qq( tar xvf - -C "$store_path/$target_path" );
         my $remote_cmd   = $ssh->{'link'}->make_remote_command($cmd);
-        my $combined_cmd = qq(cd "$path"; tar cf - "$name" | $remote_cmd );
+        my $combined_cmd = qq(cd "$path"; tar cf - "./$name" | $remote_cmd );
         system "$combined_cmd";
 
-        app->log->trace("cd $path; cd $path; tar cf - $name | ssh $cmd");
+        app->log->trace("cd $path; cd $path; tar cf - ./$name | ssh $cmd");
 
         $path->remove_tree({keep_root => 1}, "tmp/$id");
 
